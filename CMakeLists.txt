@@ -32,6 +32,7 @@ add_library(netft_cli_output
   src/monitor/latest_sample.cpp
   src/output/records.cpp
   src/output/context.cpp
+  src/output/confirmation.cpp
   src/output/json.cpp
   src/output/csv.cpp
   src/output/terminal.cpp
@@ -48,6 +49,7 @@ netft_enable_warnings(netft_cli_output)
 netft_enable_sanitizers(netft_cli_output)
 
 add_library(netft_cli_commands
+  src/commands/bias.cpp
   src/commands/info.cpp
   src/commands/monitor.cpp
 )
@@ -148,6 +150,18 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_monitor_test)
   netft_enable_sanitizers(netft_monitor_test)
   add_test(NAME netft_monitor COMMAND netft_monitor_test)
+
+  add_executable(netft_bias_test test/unit/bias_command_test.cpp)
+  target_compile_features(netft_bias_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_bias_test PRIVATE
+    netft_cli_commands
+    netft_cli_output
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_bias_test)
+  netft_enable_sanitizers(netft_bias_test)
+  add_test(NAME netft_bias COMMAND netft_bias_test)
 
   add_test(
     NAME sync_core

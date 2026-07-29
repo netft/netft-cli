@@ -20,6 +20,13 @@ public:
   netft::HealthSnapshot health() const override;
 
   void set_samples(std::vector<netft::Sample> samples) { samples_ = std::move(samples); }
+  void set_post_bias_samples(std::vector<netft::Sample> samples) {
+    post_bias_samples_ = std::move(samples);
+    post_bias_samples_emitted_ = false;
+  }
+  void set_during_bias_samples(std::vector<netft::Sample> samples) {
+    during_bias_samples_ = std::move(samples);
+  }
   void set_health(netft::HealthSnapshot health) { health_ = std::move(health); }
   void fail_start(bool fail = true) noexcept { fail_start_ = fail; }
   void fail_bias(bool fail = true) noexcept { fail_bias_ = fail; }
@@ -30,12 +37,16 @@ public:
 
 private:
   std::vector<netft::Sample> samples_;
+  std::vector<netft::Sample> post_bias_samples_;
+  std::vector<netft::Sample> during_bias_samples_;
+  Callback callback_;
   netft::HealthSnapshot health_;
   std::size_t start_calls_{};
   std::size_t stop_calls_{};
   std::size_t bias_calls_{};
   bool fail_start_{};
   bool fail_bias_{};
+  mutable bool post_bias_samples_emitted_{};
 };
 
 class FakeBackend final : public SensorBackend {
