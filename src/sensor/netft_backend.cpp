@@ -4,6 +4,7 @@
 #include <netft/discovery.hpp>
 
 #include <memory>
+#include <mutex>
 #include <utility>
 
 namespace netft_cli {
@@ -34,12 +35,22 @@ class NetftSession final : public SensorSession {
 public:
   explicit NetftSession(netft::Config config) : client_(std::move(config)) {}
 
-  void start(Callback callback) override { client_.start(std::move(callback)); }
+  void start(Callback callback) override {
+    client_.start([this, callback = std::move(callback)](const netft::Sample &sample) {
+      std::scoped_lock lock(callback_gate_);
+      callback(sample);
+    });
+  }
   void stop() noexcept override { client_.stop(); }
-  void bias() override { client_.bias(); }
+  void bias(BiasCompletion on_command_complete) override {
+    std::scoped_lock lock(callback_gate_);
+    client_.bias();
+    on_command_complete();
+  }
   netft::HealthSnapshot health() const override { return client_.health(); }
 
 private:
+  std::mutex callback_gate_;
   netft::Client client_;
 };
 

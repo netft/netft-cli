@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
-#include <istream>
 #include <ostream>
 #include <string>
+#include <utility>
 
 namespace netft_cli {
 namespace {
@@ -53,11 +53,19 @@ bool TerminalConfirmation::confirm(const BiasPreview &preview) {
     throw AppError{ExitCode::Io, "failed to write confirmation prompt"};
   }
 
-  std::string response;
-  if (!std::getline(output_.input, response)) {
+  auto result = line_reader_.read_line(interrupt_);
+  switch (result.status) {
+  case LineReadStatus::Eof:
     return false;
+  case LineReadStatus::Interrupted:
+    interrupt_.request();
+    return false;
+  case LineReadStatus::Error:
+    throw AppError{ExitCode::Io, "failed to read confirmation input"};
+  case LineReadStatus::Line:
+    break;
   }
-  response = normalized(std::move(response));
+  auto response = normalized(std::move(result.line));
   return response == "y" || response == "yes";
 }
 

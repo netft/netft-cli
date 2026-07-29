@@ -9,7 +9,9 @@ public:
 
   void start(Callback callback) override { session_->start(std::move(callback)); }
   void stop() noexcept override { session_->stop(); }
-  void bias() override { session_->bias(); }
+  void bias(BiasCompletion on_command_complete) override {
+    session_->bias(std::move(on_command_complete));
+  }
   netft::HealthSnapshot health() const override { return session_->health(); }
 
 private:
@@ -34,7 +36,7 @@ void FakeSession::stop() noexcept {
   callback_ = {};
 }
 
-void FakeSession::bias() {
+void FakeSession::bias(BiasCompletion on_command_complete) {
   ++bias_calls_;
   if (fail_bias_) {
     throw std::runtime_error("fake bias failure");
@@ -42,17 +44,16 @@ void FakeSession::bias() {
   for (const auto &sample : during_bias_samples_) {
     callback_(sample);
   }
+  on_command_complete();
+  for (const auto &sample : completion_boundary_samples_) {
+    callback_(sample);
+  }
+  for (const auto &sample : post_bias_samples_) {
+    callback_(sample);
+  }
 }
 
-netft::HealthSnapshot FakeSession::health() const {
-  if (bias_calls_ != 0U && !post_bias_samples_emitted_) {
-    post_bias_samples_emitted_ = true;
-    for (const auto &sample : post_bias_samples_) {
-      callback_(sample);
-    }
-  }
-  return health_;
-}
+netft::HealthSnapshot FakeSession::health() const { return health_; }
 
 FakeBackend::FakeBackend() : session_(std::make_shared<FakeSession>()) {}
 

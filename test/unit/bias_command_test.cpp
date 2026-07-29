@@ -5,6 +5,7 @@
 #include "support/assertions.hpp"
 #include "support/fake_backend.hpp"
 #include "support/fake_confirmation.hpp"
+#include "support/fake_line_reader.hpp"
 #include "support/memory_output.hpp"
 #include "support/options.hpp"
 #include "support/records.hpp"
@@ -31,8 +32,10 @@ void prepare(test::FakeBackend &backend, std::uint32_t before,
 }
 
 TEST(TerminalConfirmation, AcceptsAffirmativeAfterShowingRawAndScaledPreview) {
-  test::MemoryOutput output("yes\n", true, true);
-  TerminalConfirmation confirmation(output.context());
+  test::MemoryOutput output("", true, true);
+  InterruptFlag interrupt;
+  test::FakeLineReader reader({LineReadStatus::Line, "yes"});
+  TerminalConfirmation confirmation(output.context(), interrupt, reader);
   const BiasPreview preview{
       make_configuration_record(test::connection_options(), test::configuration()),
       test::sample_record(10)};
@@ -42,16 +45,43 @@ TEST(TerminalConfirmation, AcceptsAffirmativeAfterShowingRawAndScaledPreview) {
   EXPECT_TRUE(output.standard_output_text().empty());
   EXPECT_NE(output.standard_error_text().find("-20"), std::string::npos);
   EXPECT_NE(output.standard_error_text().find("-2.5"), std::string::npos);
+  EXPECT_EQ(reader.calls(), 1U);
 }
 
 TEST(TerminalConfirmation, RejectsNonAffirmativeInput) {
-  test::MemoryOutput output("maybe\n", true, true);
-  TerminalConfirmation confirmation(output.context());
+  test::MemoryOutput output("", true, true);
+  InterruptFlag interrupt;
+  test::FakeLineReader reader({LineReadStatus::Line, "maybe"});
+  TerminalConfirmation confirmation(output.context(), interrupt, reader);
   const BiasPreview preview{
       make_configuration_record(test::connection_options(), test::configuration()),
       test::sample_record(10)};
 
   EXPECT_FALSE(confirmation.confirm(preview));
+}
+
+TEST(TerminalConfirmation, TreatsEndOfInputAsDecline) {
+  test::MemoryOutput output("", true, true);
+  InterruptFlag interrupt;
+  test::FakeLineReader reader({LineReadStatus::Eof, {}});
+  TerminalConfirmation confirmation(output.context(), interrupt, reader);
+  const BiasPreview preview{
+      make_configuration_record(test::connection_options(), test::configuration()),
+      test::sample_record(10)};
+
+  EXPECT_FALSE(confirmation.confirm(preview));
+}
+
+TEST(TerminalConfirmation, MapsInputReadErrorToIo) {
+  test::MemoryOutput output("", true, true);
+  InterruptFlag interrupt;
+  test::FakeLineReader reader({LineReadStatus::Error, {}});
+  TerminalConfirmation confirmation(output.context(), interrupt, reader);
+  const BiasPreview preview{
+      make_configuration_record(test::connection_options(), test::configuration()),
+      test::sample_record(10)};
+
+  test::expect_app_error(ExitCode::Io, [&] { confirmation.confirm(preview); });
 }
 
 TEST(BiasCommand, DeclineDoesNotSendBias) {
@@ -103,6 +133,23 @@ TEST(BiasCommand, InterruptedConfirmationDoesNotSendBias) {
             static_cast<int>(ExitCode::Interrupted));
 
   EXPECT_EQ(confirmation.calls(), 1U);
+  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.session().stop_calls(), 1U);
+  EXPECT_TRUE(output.standard_output_text().empty());
+}
+
+TEST(BiasCommand, InterruptedLineReadReturnsWithoutInputAndDoesNotSendBias) {
+  test::FakeBackend backend;
+  prepare(backend, 10);
+  test::MemoryOutput output("", true, true);
+  InterruptFlag interrupt;
+  test::FakeLineReader reader({LineReadStatus::Interrupted, {}});
+  TerminalConfirmation confirmation(output.context(), interrupt, reader);
+
+  EXPECT_EQ(run_bias(test::bias_options(false), backend, output.context(), confirmation, interrupt),
+            static_cast<int>(ExitCode::Interrupted));
+
+  EXPECT_EQ(reader.calls(), 1U);
   EXPECT_EQ(backend.session().bias_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
@@ -162,6 +209,25 @@ TEST(BiasCommand, CallbackWhileBiasCommandIsInProgressIsNotAcceptedAsPostBias) {
   EXPECT_EQ(backend.session().bias_calls(), 1U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
+}
+
+TEST(BiasCommand, QualifyingCallbackAtCommandCompletionBoundaryIsNotLost) {
+  test::FakeBackend backend;
+  prepare(backend, 10);
+  backend.session().set_completion_boundary_samples({test::sample(11)});
+  auto options = test::bias_options(true);
+  options.connection.timeout = 1ms;
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  EXPECT_EQ(run_bias(options, backend, output.context(), confirmation, interrupt), 0);
+
+  EXPECT_EQ(backend.session().bias_calls(), 1U);
+  EXPECT_EQ(backend.session().stop_calls(), 1U);
+  const auto document = test::parse_json(output.standard_output_text());
+  EXPECT_EQ(document.at("before").at("rdt_sequence"), 10U);
+  EXPECT_EQ(document.at("after").at("rdt_sequence"), 11U);
 }
 
 TEST(BiasCommand, NoPreBiasSampleDoesNotSendBias) {

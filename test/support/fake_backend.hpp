@@ -16,16 +16,18 @@ class FakeSession final : public SensorSession {
 public:
   void start(Callback callback) override;
   void stop() noexcept override;
-  void bias() override;
+  void bias(BiasCompletion on_command_complete) override;
   netft::HealthSnapshot health() const override;
 
   void set_samples(std::vector<netft::Sample> samples) { samples_ = std::move(samples); }
   void set_post_bias_samples(std::vector<netft::Sample> samples) {
     post_bias_samples_ = std::move(samples);
-    post_bias_samples_emitted_ = false;
   }
   void set_during_bias_samples(std::vector<netft::Sample> samples) {
     during_bias_samples_ = std::move(samples);
+  }
+  void set_completion_boundary_samples(std::vector<netft::Sample> samples) {
+    completion_boundary_samples_ = std::move(samples);
   }
   void set_health(netft::HealthSnapshot health) { health_ = std::move(health); }
   void fail_start(bool fail = true) noexcept { fail_start_ = fail; }
@@ -39,6 +41,7 @@ private:
   std::vector<netft::Sample> samples_;
   std::vector<netft::Sample> post_bias_samples_;
   std::vector<netft::Sample> during_bias_samples_;
+  std::vector<netft::Sample> completion_boundary_samples_;
   Callback callback_;
   netft::HealthSnapshot health_;
   std::size_t start_calls_{};
@@ -46,7 +49,6 @@ private:
   std::size_t bias_calls_{};
   bool fail_start_{};
   bool fail_bias_{};
-  mutable bool post_bias_samples_emitted_{};
 };
 
 class FakeBackend final : public SensorBackend {

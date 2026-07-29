@@ -38,9 +38,15 @@ add_library(netft_cli_output
   src/output/terminal.cpp
 )
 if(WIN32)
-  target_sources(netft_cli_output PRIVATE src/platform/terminal_windows.cpp)
+  target_sources(netft_cli_output PRIVATE
+    src/platform/line_reader_windows.cpp
+    src/platform/terminal_windows.cpp
+  )
 else()
-  target_sources(netft_cli_output PRIVATE src/platform/terminal_posix.cpp)
+  target_sources(netft_cli_output PRIVATE
+    src/platform/line_reader_posix.cpp
+    src/platform/terminal_posix.cpp
+  )
 endif()
 target_compile_features(netft_cli_output PUBLIC cxx_std_17)
 target_include_directories(netft_cli_output PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -126,6 +132,17 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_latest_sample_test)
   netft_enable_sanitizers(netft_latest_sample_test)
   add_test(NAME netft_latest_sample COMMAND netft_latest_sample_test)
+
+  add_executable(netft_line_reader_test test/unit/line_reader_test.cpp)
+  target_compile_features(netft_line_reader_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_line_reader_test PRIVATE
+    netft_cli_output
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_line_reader_test)
+  netft_enable_sanitizers(netft_line_reader_test)
+  add_test(NAME netft_line_reader COMMAND netft_line_reader_test)
 
   add_executable(netft_info_test test/unit/info_command_test.cpp)
   target_compile_features(netft_info_test PRIVATE cxx_std_17)

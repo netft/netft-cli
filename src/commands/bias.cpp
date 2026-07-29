@@ -158,11 +158,10 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
   preview_sequence.store(before_sample->rdt_sequence, std::memory_order_release);
   phase.store(BiasPhase::Sending, std::memory_order_release);
   try {
-    session->bias();
+    session->bias([&phase] { phase.store(BiasPhase::After, std::memory_order_release); });
   } catch (const std::exception &) {
     throw AppError{ExitCode::Stream, "sensor bias command failed"};
   }
-  phase.store(BiasPhase::After, std::memory_order_release);
   require_healthy(read_health(*session));
 
   if (!after_slot.wait_for_first(options.connection.timeout, interrupt)) {
