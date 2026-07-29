@@ -29,7 +29,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/netft/netft-cli/main/scripts/install/install.ps1 | iex
 ```
 
-The installers select the latest stable release for the current platform and verify the downloaded archive. Prebuilt archives are also available from [GitHub Releases](https://github.com/netft/netft-cli/releases).
+The installers select the latest published stable release for the current platform and verify the downloaded archive. Prebuilt archives for published versions appear on [GitHub Releases](https://github.com/netft/netft-cli/releases).
 
 ### Build from source
 
@@ -61,7 +61,7 @@ netft monitor 192.168.1.1
 netft monitor 192.168.1.1 --format ndjson --rate 20
 ```
 
-Interactive output uses a live table. Redirected output defaults to NDJSON; `--format csv` is also available. `--rate` controls the output rate and defaults to 20 Hz, while `--duration 10s` bounds a run.
+Interactive output uses a live table. Redirected output defaults to NDJSON; `--format csv` is also available. `--rate` controls the output rate and defaults to 20 Hz. A monitor runs until interrupted unless `--duration`, such as `--duration 10s`, is provided.
 
 `monitor` samples the latest available value at the selected output rate. It keeps no sample backlog and is not a lossless recorder of every RDT packet.
 
@@ -73,19 +73,21 @@ netft bias 192.168.1.1
 
 Bias changes the sensor's measurement zero and therefore changes subsequent output. The command shows the current reading and requires confirmation from a terminal. Use `--yes` only for a deliberately pre-authorized noninteractive operation with the sensor and connected equipment in a safe state.
 
-All commands accept `--http-port`, `--rdt-port`, `--timeout`, and `--output`. Run `netft help <COMMAND>` for the exact options and formats supported by a command. `192.168.1.1` is the ATI factory-default sensor address; replace it with the address configured for your sensor.
+Connection defaults are HTTP port `80`, RDT port `49152`, and a `1s` timeout. The default `--format auto` uses text for `info` and `bias` on a terminal and JSON when redirected; `monitor` uses a live table on a terminal and NDJSON when redirected. `--output PATH` writes to that file instead of standard output and replaces existing contents; with `auto`, it selects the same machine-readable format as redirection. Run `netft help <COMMAND>` for the command reference.
+
+`192.168.1.1` is the ATI factory-default sensor address; replace it with the address configured for your sensor.
 
 ## Supported platforms
 
-Release binaries contain the CLI and its private `netft-cpp` core and do not require a separate `netft-cpp` or libcurl installation.
+The project defines five native release targets. Binaries built for these targets contain the CLI and its private `netft-cpp` core and do not require a separate `netft-cpp` or libcurl installation.
 
-| Platform | Architecture | Release binary | Source build |
-| --- | --- | --- | --- |
-| Linux | x86_64 | Available | Supported |
-| Linux | ARM64 | Available | Supported |
-| macOS | Intel x86_64 | Available | Supported |
-| macOS | Apple silicon | Available | Supported |
-| Windows | x86_64 | Available | Supported |
+| Release target | Platform | Architecture |
+| --- | --- | --- |
+| `linux-x86_64` | Linux | x86_64 |
+| `linux-arm64` | Linux | ARM64 |
+| `macos-x86_64` | macOS | Intel x86_64 |
+| `macos-arm64` | macOS | Apple silicon |
+| `windows-x86_64` | Windows | x86_64 |
 
 ## Security
 

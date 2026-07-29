@@ -45,16 +45,18 @@ Never commit a laboratory sensor address, credentials, or private network detail
 
 ## Core synchronization
 
-The private core snapshot comes from [netft-cpp](https://github.com/netft/netft-cpp). Do not edit protocol, transport, discovery, recovery, or sensor-configuration files below `core/netft` in this repository.
+The private core snapshot comes from [netft-cpp](https://github.com/netft/netft-cpp). The current synchronization command accepts only `netft-cpp` tag `v0.3.0` at commit `46ee05639f818a17c1cfe604d0d77b1feb8f9b2b`; it applies the checksum-pinned `core/ADAPTATIONS.patch` to reproduce the existing adapted snapshot.
 
-Make core behavior changes upstream in `netft-cpp` first. After an upstream release is reviewed, synchronize from a clean checkout at the exact release tag:
+To reproduce the current snapshot from a clean checkout at that exact tag:
 
 ```bash
-python tools/sync_core.py sync --source <path-to-netft-cpp> --tag <release-tag>
+python tools/sync_core.py sync --source <path-to-netft-cpp> --tag v0.3.0
 python tools/sync_core.py verify
 ```
 
-Commit the updated `core/UPSTREAM`, manifest, selected snapshot files, and notices together. A pull request must identify the upstream tag and commit and explain any CLI adaptation outside the snapshot.
+Do not edit the generated `core/netft` tree manually. Shared core behavior changes must be accepted in `netft-cpp` first; the adaptation patch is limited to reviewed CLI-specific integration and must not bypass that upstream-first rule.
+
+A core upgrade is a maintainer-controlled change. The maintainer updates the pinned tag and commit in `tools/sync_core.py` and the corresponding tests, rebuilds and audits `core/ADAPTATIONS.patch` against that exact upstream base, and updates its pinned SHA-256. The synchronization command then regenerates `core/netft`, `core/UPSTREAM`, and `core/MANIFEST.sha256`; notices and snapshot tests are updated and the complete snapshot verification is run before the files are committed together.
 
 ## Pull requests
 
