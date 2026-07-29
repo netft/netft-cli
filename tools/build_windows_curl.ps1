@@ -105,9 +105,20 @@ try {
         throw "unable to install curl"
     }
 
-    $staticLibrary = Join-Path $prefix "lib\libcurl.lib"
+    $installedLibrary = Join-Path $prefix "lib\libcurl.lib"
+    $staticLibrary = Join-Path $prefix "lib\libcurl_a.lib"
+    if ((Test-Path -LiteralPath $installedLibrary -PathType Leaf) -and
+        (Test-Path -LiteralPath $staticLibrary -PathType Leaf)) {
+        throw "curl installed ambiguous static and import-style libraries"
+    }
+    if (Test-Path -LiteralPath $installedLibrary -PathType Leaf) {
+        Move-Item -LiteralPath $installedLibrary -Destination $staticLibrary
+    }
     if (-not (Test-Path -LiteralPath $staticLibrary -PathType Leaf)) {
         throw "curl static library was not installed"
+    }
+    if (Test-Path -LiteralPath $installedLibrary) {
+        throw "curl import-style library was unexpectedly retained"
     }
     if (Get-ChildItem -LiteralPath $prefix -Recurse -Filter "libcurl.dll") {
         throw "curl shared library was unexpectedly installed"

@@ -103,6 +103,21 @@ def test_windows_package_uses_executable_name_and_reproducible_zip_metadata(
             "netft-cli-0.1.0/netft.exe",
         ]
         assert len({entry.date_time for entry in release.infolist()}) == 1
+        assert [entry.external_attr >> 16 & 0o777 for entry in release.infolist()] == [
+            0o644,
+            0o644,
+            0o644,
+            0o755,
+        ]
+
+    second = package_release(
+        tmp_path / "netft.exe",
+        version="0.1.0",
+        target="windows-x86_64",
+        output=tmp_path / "second",
+        source_root=ROOT,
+    )
+    assert archive.read_bytes() == second.read_bytes()
 
 
 def test_package_rejects_target_binary_name_mismatch(tmp_path: Path) -> None:

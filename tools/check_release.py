@@ -25,6 +25,13 @@ TARGET_EXTENSIONS: Final = {
     "windows-x86_64": ".zip",
 }
 CHECKSUM_PATTERN: Final = re.compile(r"([0-9a-f]{64})  ([^\s/]+)")
+TARGET_BINARY_FORMAT: Final = {
+    "linux-x86_64": ("elf", "x86_64"),
+    "linux-arm64": ("elf", "arm64"),
+    "macos-x86_64": ("macho", "x86_64"),
+    "macos-arm64": ("macho", "arm64"),
+    "windows-x86_64": ("pe", "x86_64"),
+}
 
 
 class ReleaseError(RuntimeError):
@@ -94,6 +101,72 @@ def reject_dynamic_libcurl(dependencies: Iterable[str]) -> None:
             raise ReleaseError(f"dynamic libcurl dependency detected: {dependency}")
 
 
+def inspect_binary_format(binary: Path) -> tuple[str, str]:
+    with binary.open("rb") as source:
+        header = source.read(64)
+        if header.startswith(b"\x7fELF"):
+            if len(header) < 20 or header[4] != 2 or header[5] not in (1, 2):
+                raise ReleaseError("release binary is not a supported ELF64 file")
+            byteorder = "little" if header[5] == 1 else "big"
+            machine = int.from_bytes(header[18:20], byteorder)
+            architectures = {62: "x86_64", 183: "arm64"}
+            if machine not in architectures:
+                raise ReleaseError("release binary has an unsupported ELF architecture")
+            return "elf", architectures[machine]
+
+        macho_magic = header[:4]
+        fat_macho_magics = {
+            b"\xca\xfe\xba\xbe",
+            b"\xbe\xba\xfe\xca",
+            b"\xca\xfe\xba\xbf",
+            b"\xbf\xba\xfe\xca",
+        }
+        if macho_magic in fat_macho_magics:
+            raise ReleaseError("universal Mach-O binaries are not release assets")
+        macho_endian = {
+            b"\xcf\xfa\xed\xfe": "little",
+            b"\xfe\xed\xfa\xcf": "big",
+        }.get(macho_magic)
+        if macho_endian is not None:
+            if len(header) < 8:
+                raise ReleaseError("release binary has a truncated Mach-O header")
+            cpu_type = int.from_bytes(header[4:8], macho_endian)
+            architectures = {
+                0x01000007: "x86_64",
+                0x0100000C: "arm64",
+            }
+            if cpu_type not in architectures:
+                raise ReleaseError("release binary has an unsupported Mach-O architecture")
+            return "macho", architectures[cpu_type]
+
+        if header.startswith(b"MZ"):
+            if len(header) < 64:
+                raise ReleaseError("release binary has a truncated DOS header")
+            pe_offset = int.from_bytes(header[60:64], "little")
+            source.seek(pe_offset)
+            coff_header = source.read(6)
+            if len(coff_header) != 6 or coff_header[:4] != b"PE\0\0":
+                raise ReleaseError("release binary has an invalid PE header")
+            machine = int.from_bytes(coff_header[4:6], "little")
+            architectures = {0x8664: "x86_64", 0xAA64: "arm64"}
+            if machine not in architectures:
+                raise ReleaseError("release binary has an unsupported PE architecture")
+            return "pe", architectures[machine]
+
+    raise ReleaseError("release binary format is not supported")
+
+
+def validate_binary_target(binary: Path, target: str) -> None:
+    expected = TARGET_BINARY_FORMAT.get(target)
+    if expected is None:
+        raise ReleaseError(f"unsupported release target: {target}")
+    actual = inspect_binary_format(binary)
+    if actual != expected:
+        raise ReleaseError(
+            f"release binary format {actual[0]}/{actual[1]} does not match {target}"
+        )
+
+
 def _run_tool(command: list[str]) -> str:
     try:
         completed = subprocess.run(
@@ -109,13 +182,11 @@ def _run_tool(command: list[str]) -> str:
     return completed.stdout
 
 
-def _elf_dependencies(binary: Path) -> list[str]:
-    output = _run_tool(["readelf", "-d", str(binary)])
+def parse_elf_dependencies(output: str) -> list[str]:
     return re.findall(r"\(NEEDED\).*Shared library: \[([^\]]+)\]", output)
 
 
-def _macho_dependencies(binary: Path) -> list[str]:
-    output = _run_tool(["otool", "-L", str(binary)])
+def parse_macho_dependencies(output: str) -> list[str]:
     return [
         line.strip().split(" ", 1)[0]
         for line in output.splitlines()[1:]
@@ -123,15 +194,33 @@ def _macho_dependencies(binary: Path) -> list[str]:
     ]
 
 
+def parse_pe_dependencies(output: str, tool: str) -> list[str]:
+    if tool == "llvm-readobj":
+        return re.findall(r"^\s*Name:\s*(\S+)\s*$", output, re.MULTILINE)
+    if tool == "dumpbin":
+        return re.findall(
+            r"^\s+(\S+\.dll)\s*$", output, re.IGNORECASE | re.MULTILINE
+        )
+    raise ReleaseError(f"unsupported PE dependency inspection tool: {tool}")
+
+
+def _elf_dependencies(binary: Path) -> list[str]:
+    return parse_elf_dependencies(_run_tool(["readelf", "-d", str(binary)]))
+
+
+def _macho_dependencies(binary: Path) -> list[str]:
+    return parse_macho_dependencies(_run_tool(["otool", "-L", str(binary)]))
+
+
 def _pe_dependencies(binary: Path) -> list[str]:
     llvm_readobj = shutil.which("llvm-readobj")
     if llvm_readobj is not None:
         output = _run_tool([llvm_readobj, "--coff-imports", str(binary)])
-        return re.findall(r"^\s*Name:\s*(\S+)\s*$", output, re.MULTILINE)
+        return parse_pe_dependencies(output, "llvm-readobj")
     dumpbin = shutil.which("dumpbin")
     if dumpbin is not None:
         output = _run_tool([dumpbin, "/dependents", str(binary)])
-        return re.findall(r"^\s+(\S+\.dll)\s*$", output, re.IGNORECASE | re.MULTILINE)
+        return parse_pe_dependencies(output, "dumpbin")
     raise ReleaseError(
         "PE dependency inspection requires llvm-readobj or dumpbin"
     )
@@ -255,6 +344,7 @@ def validate_archive(asset: Path, version: str) -> None:
     target = _target_from_asset(asset, version)
     with tempfile.TemporaryDirectory(prefix="netft-cli-release-") as temporary:
         binary = _extract_checked(asset, target, version, Path(temporary))
+        validate_binary_target(binary, target)
         reject_dynamic_libcurl(inspect_dynamic_dependencies(binary, target))
         if target == _native_target():
             _check_version(binary, version)
