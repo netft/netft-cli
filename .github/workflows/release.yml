@@ -309,7 +309,7 @@ jobs:
           echo "release_id=${release_id}" >>"${GITHUB_OUTPUT}"
 
   smoke:
-    needs: draft_release
+    needs: [assemble, draft_release]
     strategy:
       fail-fast: false
       matrix:
@@ -329,6 +329,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-bundle
+          path: trusted-release
 
       - if: matrix.target != 'windows-x86_64'
         shell: bash
@@ -340,20 +344,45 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           asset_directory="${RUNNER_TEMP}/release-root/releases/download/${GITHUB_REF_NAME}"
           install_directory="${RUNNER_TEMP}/netft-install"
+          asset_list="${RUNNER_TEMP}/release-assets"
+          current_asset_list="${RUNNER_TEMP}/current-release-assets"
+          metadata="${RUNNER_TEMP}/release-metadata.json"
           mkdir -p "${asset_directory}" "${install_directory}"
           gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
-            >"${RUNNER_TEMP}/release-metadata.json"
+            "repos/${GITHUB_REPOSITORY}/releases/${EXPECTED_RELEASE_ID}" \
+            >"${metadata}"
           python3 tools/release_inventory.py validate-remote \
-            --metadata "${RUNNER_TEMP}/release-metadata.json" \
+            --metadata "${metadata}" \
             --version "${version}" \
             --expected-release-id "${EXPECTED_RELEASE_ID}"
-          gh release download "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --dir "${asset_directory}"
-          NETFT_RELEASE_DIR="${asset_directory}" VERSION="${version}" \
+          python3 tools/release_inventory.py asset-downloads \
+            --metadata "${metadata}" \
+            --version "${version}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}" \
+            >"${asset_list}"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            gh api \
+              -H "Accept: application/octet-stream" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              >"${asset_directory}/${asset_name}"
+          done <"${asset_list}"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${EXPECTED_RELEASE_ID}" \
+            >"${metadata}"
+          python3 tools/release_inventory.py validate-remote \
+            --metadata "${metadata}" \
+            --version "${version}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}"
+          python3 tools/release_inventory.py asset-downloads \
+            --metadata "${metadata}" \
+            --version "${version}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}" \
+            >"${current_asset_list}"
+          cmp "${asset_list}" "${current_asset_list}"
+          TRUSTED_RELEASE_DIR="${GITHUB_WORKSPACE}/trusted-release/dist" \
+            REMOTE_RELEASE_DIR="${asset_directory}" VERSION="${version}" \
             python3 -c \
-              'import os; from pathlib import Path; from tools.check_release import validate_inventory; validate_inventory(Path(os.environ["NETFT_RELEASE_DIR"]), os.environ["VERSION"])'
+              'import os; from pathlib import Path; from tools.check_release import compare_release_inventories; compare_release_inventories(Path(os.environ["TRUSTED_RELEASE_DIR"]), Path(os.environ["REMOTE_RELEASE_DIR"]), os.environ["VERSION"])'
           python3 -m http.server 49152 \
             --bind 127.0.0.1 \
             --directory "${RUNNER_TEMP}/release-root" \
@@ -395,8 +424,11 @@ jobs:
           $Root = Join-Path $env:RUNNER_TEMP "release-root"
           $Assets = Join-Path $Root "releases\download\$env:GITHUB_REF_NAME"
           $Install = Join-Path $env:RUNNER_TEMP "netft-install"
+          $Trusted = Join-Path $env:GITHUB_WORKSPACE "trusted-release\dist"
           $Metadata = Join-Path $env:RUNNER_TEMP "release-metadata.json"
-          $ReleaseEndpoint = "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:GITHUB_REF_NAME"
+          $AssetList = Join-Path $env:RUNNER_TEMP "release-assets"
+          $CurrentAssetList = Join-Path $env:RUNNER_TEMP "current-release-assets"
+          $ReleaseEndpoint = "repos/$env:GITHUB_REPOSITORY/releases/$ExpectedReleaseId"
           New-Item -ItemType Directory -Force -Path $Assets, $Install | Out-Null
           gh api $ReleaseEndpoint > $Metadata
           Assert-NativeSuccess
@@ -405,17 +437,42 @@ jobs:
             --version $Version `
             --expected-release-id $ExpectedReleaseId
           Assert-NativeSuccess
-          gh release download $env:GITHUB_REF_NAME `
-            --repo $env:GITHUB_REPOSITORY `
-            --dir $Assets
+          python tools/release_inventory.py asset-downloads `
+            --metadata $Metadata `
+            --version $Version `
+            --expected-release-id $ExpectedReleaseId > $AssetList
           Assert-NativeSuccess
-          $env:NETFT_RELEASE_DIR = $Assets
+          foreach ($Line in Get-Content $AssetList) {
+            $AssetId, $AssetName = $Line.Split("`t", 2)
+            $AssetPath = Join-Path $Assets $AssetName
+            gh api `
+              -H "Accept: application/octet-stream" `
+              "repos/$env:GITHUB_REPOSITORY/releases/assets/$AssetId" `
+              > $AssetPath
+            Assert-NativeSuccess
+          }
+          gh api $ReleaseEndpoint > $Metadata
+          Assert-NativeSuccess
+          python tools/release_inventory.py asset-downloads `
+            --metadata $Metadata `
+            --version $Version `
+            --expected-release-id $ExpectedReleaseId > $CurrentAssetList
+          Assert-NativeSuccess
+          if (Compare-Object (Get-Content $AssetList) (Get-Content $CurrentAssetList)) {
+            throw "release asset identity changed during download"
+          }
+          $env:TRUSTED_RELEASE_DIR = $Trusted
+          $env:REMOTE_RELEASE_DIR = $Assets
           $env:VERSION = $Version
           python -c @'
           import os
           from pathlib import Path
-          from tools.check_release import validate_inventory
-          validate_inventory(Path(os.environ["NETFT_RELEASE_DIR"]), os.environ["VERSION"])
+          from tools.check_release import compare_release_inventories
+          compare_release_inventories(
+              Path(os.environ["TRUSTED_RELEASE_DIR"]),
+              Path(os.environ["REMOTE_RELEASE_DIR"]),
+              os.environ["VERSION"],
+          )
           '@
           Assert-NativeSuccess
           $Server = Start-Process python `
@@ -445,7 +502,7 @@ jobs:
           }
 
   publish:
-    needs: [smoke, draft_release]
+    needs: [assemble, smoke, draft_release]
     runs-on: ubuntu-24.04
     environment: netft-release
     permissions:
@@ -454,19 +511,55 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-bundle
+          path: trusted-release
       - env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_RELEASE_ID: ${{ needs.draft_release.outputs.release_id }}
         run: |
           set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          metadata="${RUNNER_TEMP}/release-metadata.json"
+          asset_directory="${RUNNER_TEMP}/remote-release"
+          asset_list="${RUNNER_TEMP}/release-assets"
+          current_asset_list="${RUNNER_TEMP}/current-release-assets"
+          mkdir -p "${asset_directory}"
           gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
-            >"${RUNNER_TEMP}/release-metadata.json"
+            "repos/${GITHUB_REPOSITORY}/releases/${EXPECTED_RELEASE_ID}" \
+            >"${metadata}"
           python3 tools/release_inventory.py validate-remote \
-            --metadata "${RUNNER_TEMP}/release-metadata.json" \
-            --version "${GITHUB_REF_NAME#v}" \
+            --metadata "${metadata}" \
+            --version "${version}" \
             --expected-release-id "${EXPECTED_RELEASE_ID}"
-          gh release edit "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --draft=false \
-            --prerelease=false
+          python3 tools/release_inventory.py asset-downloads \
+            --metadata "${metadata}" \
+            --version "${version}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}" \
+            >"${asset_list}"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            gh api \
+              -H "Accept: application/octet-stream" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              >"${asset_directory}/${asset_name}"
+          done <"${asset_list}"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${EXPECTED_RELEASE_ID}" \
+            >"${metadata}"
+          python3 tools/release_inventory.py asset-downloads \
+            --metadata "${metadata}" \
+            --version "${version}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}" \
+            >"${current_asset_list}"
+          cmp "${asset_list}" "${current_asset_list}"
+          TRUSTED_RELEASE_DIR="${GITHUB_WORKSPACE}/trusted-release/dist" \
+            REMOTE_RELEASE_DIR="${asset_directory}" VERSION="${version}" \
+            python3 -c \
+              'import os; from pathlib import Path; from tools.check_release import compare_release_inventories; compare_release_inventories(Path(os.environ["TRUSTED_RELEASE_DIR"]), Path(os.environ["REMOTE_RELEASE_DIR"]), os.environ["VERSION"])'
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${EXPECTED_RELEASE_ID}" \
+            -F tag_name="${GITHUB_REF_NAME}" \
+            -F draft=false \
+            -F prerelease=false \
+            >/dev/null

@@ -95,6 +95,25 @@ def validate_inventory(
     return assets
 
 
+def compare_release_inventories(
+    trusted_directory: Path, remote_directory: Path, version: str
+) -> None:
+    """Require a complete remote inventory to be byte-identical to a trusted one."""
+    trusted_assets = validate_inventory(trusted_directory, version)
+    remote_assets = validate_inventory(remote_directory, version)
+    trusted_files = [Path(trusted_directory) / "SHA256SUMS", *trusted_assets]
+    remote_files = {
+        path.name: path
+        for path in [Path(remote_directory) / "SHA256SUMS", *remote_assets]
+    }
+    for trusted in trusted_files:
+        remote = remote_files[trusted.name]
+        if trusted.read_bytes() != remote.read_bytes():
+            raise ReleaseError(
+                f"remote asset differs from trusted release bundle: {trusted.name}"
+            )
+
+
 def reject_dynamic_libcurl(dependencies: Iterable[str]) -> None:
     for dependency in dependencies:
         if re.search(r"(^|[/\\])libcurl(?:[-.]|$)", dependency, re.IGNORECASE):

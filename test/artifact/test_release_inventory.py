@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tools import check_release
 from tools.check_release import (
     ReleaseError,
     _extract_checked,
@@ -64,6 +65,31 @@ def test_inventory_accepts_exact_five_platform_assets(tmp_path: Path) -> None:
     validated = validate_inventory(tmp_path, version="0.1.0")
 
     assert [path.name for path in validated] == sorted(map(asset_name, TARGETS))
+
+
+def test_remote_inventory_must_match_trusted_release_bundle(tmp_path: Path) -> None:
+    trusted = tmp_path / "trusted"
+    remote = tmp_path / "remote"
+    trusted.mkdir()
+    remote.mkdir()
+    for target in TARGETS:
+        name = asset_name(target)
+        trusted.joinpath(name).write_bytes(target.encode())
+        remote.joinpath(name).write_bytes(target.encode())
+    write_checksums(trusted)
+    write_checksums(remote)
+
+    check_release.compare_release_inventories(
+        trusted, remote, version="0.1.0"
+    )
+
+    changed = remote / asset_name("linux-x86_64")
+    changed.write_bytes(b"replacement")
+    write_checksums(remote)
+    with pytest.raises(ReleaseError):
+        check_release.compare_release_inventories(
+            trusted, remote, version="0.1.0"
+        )
 
 
 def test_partial_inventory_still_verifies_checksum(tmp_path: Path) -> None:

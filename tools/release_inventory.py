@@ -113,10 +113,26 @@ def validate_remote_inventory(
     assets = _validated_assets(metadata, expected_release_id)
     names = [asset["name"] for asset in assets]
     expected = expected_asset_names(version)
+    if not isinstance(metadata, dict) or metadata.get("tag_name") != f"v{version}":
+        raise ReleaseInventoryError("release tag does not match the version")
     if len(names) != len(set(names)):
         raise ReleaseInventoryError("release contains duplicate asset names")
     if set(names) != expected:
         raise ReleaseInventoryError("release asset inventory is not exact")
+
+
+def remote_asset_downloads(
+    metadata: Any, version: str, expected_release_id: int
+) -> list[tuple[int, str]]:
+    """Return stable numeric asset IDs after validating the exact draft inventory."""
+    validate_remote_inventory(metadata, version, expected_release_id)
+    return sorted(
+        (
+            (asset["id"], asset["name"])
+            for asset in _validated_assets(metadata, expected_release_id)
+        ),
+        key=lambda item: item[1],
+    )
 
 
 def _load_metadata(path: Path) -> Any:
@@ -141,6 +157,10 @@ def main() -> int:
     validate.add_argument("--metadata", type=Path, required=True)
     validate.add_argument("--version", required=True)
     validate.add_argument("--expected-release-id", type=int, required=True)
+    downloads = subcommands.add_parser("asset-downloads")
+    downloads.add_argument("--metadata", type=Path, required=True)
+    downloads.add_argument("--version", required=True)
+    downloads.add_argument("--expected-release-id", type=int, required=True)
     arguments = parser.parse_args()
 
     try:
@@ -154,6 +174,11 @@ def main() -> int:
             print(draft_release_id(metadata))
         elif arguments.command == "validate-draft":
             validate_draft(metadata, arguments.expected_release_id)
+        elif arguments.command == "asset-downloads":
+            for asset_id, name in remote_asset_downloads(
+                metadata, arguments.version, arguments.expected_release_id
+            ):
+                print(f"{asset_id}\t{name}")
         else:
             validate_remote_inventory(
                 metadata, arguments.version, arguments.expected_release_id

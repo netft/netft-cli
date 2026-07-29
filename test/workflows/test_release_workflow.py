@@ -386,13 +386,13 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
     assert "releases/tags/" in draft_script
     assert "-F prerelease=false" in draft_script
     assert matrix_targets(jobs["smoke"]) == TARGETS
-    assert jobs["smoke"]["needs"] == "draft_release"
+    assert jobs["smoke"]["needs"] == ["assemble", "draft_release"]
     smoke_script = commands(jobs["smoke"])
-    assert "gh release download" in smoke_script
-    assert "--pattern" not in smoke_script
+    assert "releases/assets/${asset_id}" in smoke_script
     assert "validate-remote" in smoke_script
     assert "--expected-release-id" in smoke_script
-    assert "releases/tags/" in smoke_script
+    assert "releases/${EXPECTED_RELEASE_ID}" in smoke_script
+    assert "compare_release_inventories" in smoke_script
     assert "scripts/install/install.sh" in smoke_script
     assert "scripts/install/install.ps1" in smoke_script
     assert (
@@ -400,17 +400,75 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
         in smoke_script
     )
     assert '"http://127.0.0.1:49152/releases"' in smoke_script
-    assert jobs["publish"]["needs"] == ["smoke", "draft_release"]
+    assert jobs["publish"]["needs"] == ["assemble", "smoke", "draft_release"]
     assert jobs["publish"]["permissions"] == {"contents": "write"}
     assert "validate-remote" in commands(jobs["publish"])
     assert "--expected-release-id" in commands(jobs["publish"])
-    assert "--prerelease=false" in commands(jobs["publish"])
-    assert "releases/tags/" in commands(jobs["publish"])
+    assert "compare_release_inventories" in commands(jobs["publish"])
+    assert "releases/${EXPECTED_RELEASE_ID}" in commands(jobs["publish"])
+    assert "releases/assets/${asset_id}" in commands(jobs["publish"])
     assert (
-        'gh release edit "${GITHUB_REF_NAME}" \\\n'
-        '  --repo "${GITHUB_REPOSITORY}" \\\n'
-        "  --draft=false"
+        'gh api --method PATCH \\\n'
+        '  "repos/${GITHUB_REPOSITORY}/releases/${EXPECTED_RELEASE_ID}" \\\n'
+        '  -F tag_name="${GITHUB_REF_NAME}" \\\n'
+        "  -F draft=false"
     ) in commands(jobs["publish"])
+
+
+def test_trusted_release_bundle_flows_to_every_smoke_and_publish_job() -> None:
+    workflow = load_yaml(WORKFLOW_DIRECTORY / "release.yml")
+    jobs = workflow["jobs"]
+
+    for name in ("smoke", "publish"):
+        downloads = [
+            step
+            for step in jobs[name]["steps"]
+            if str(step.get("uses", "")).startswith("actions/download-artifact@")
+        ]
+        assert len(downloads) == 1
+        assert downloads[0]["with"] == {
+            "name": "release-bundle",
+            "path": "trusted-release",
+        }
+        script = commands(jobs[name])
+        assert "trusted-release/dist" in script
+        assert "compare_release_inventories" in script
+
+
+def test_remote_bytes_are_compared_at_each_release_execution_boundary() -> None:
+    workflow = load_yaml(WORKFLOW_DIRECTORY / "release.yml")
+    jobs = workflow["jobs"]
+    smoke_scripts = [
+        str(step["run"])
+        for step in jobs["smoke"]["steps"]
+        if "run" in step
+    ]
+
+    assert len(smoke_scripts) == 2
+    for script in smoke_scripts:
+        assert script.index("releases/assets/") < script.index(
+            "compare_release_inventories"
+        )
+        installer = (
+            "scripts/install/install.ps1"
+            if "install.ps1" in script
+            else "scripts/install/install.sh"
+        )
+        assert script.index("compare_release_inventories") < script.index(
+            installer
+        )
+        if "install.ps1" in script:
+            assert "> (" not in script
+
+    publish_script = commands(jobs["publish"])
+    assert publish_script.index("releases/assets/") < publish_script.index(
+        "compare_release_inventories"
+    )
+    comparison = publish_script.index("compare_release_inventories")
+    publication = publish_script.index("gh api --method PATCH", comparison)
+    assert comparison < publication
+    assert "gh release edit" not in publish_script
+    assert "releases/tags/" not in publish_script
 
 
 def test_only_final_release_publication_uses_protected_environment() -> None:
@@ -426,7 +484,7 @@ def test_only_final_release_publication_uses_protected_environment() -> None:
             protected_jobs[name] = environment
 
     assert protected_jobs == {"publish": "netft-release"}
-    assert jobs["publish"]["needs"] == ["smoke", "draft_release"]
+    assert jobs["publish"]["needs"] == ["assemble", "smoke", "draft_release"]
 
 
 def test_remote_release_inventory_requires_exact_draft_assets() -> None:
@@ -434,6 +492,7 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
     names = sorted(release_inventory.expected_asset_names("0.1.0"))
     metadata = {
         "id": 41,
+        "tag_name": "v0.1.0",
         "draft": True,
         "prerelease": False,
         "assets": [
@@ -451,6 +510,8 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
         {**metadata, "prerelease": True},
         {key: value for key, value in metadata.items() if key != "prerelease"},
         {**metadata, "id": 42},
+        {**metadata, "tag_name": "v9.9.9"},
+        {key: value for key, value in metadata.items() if key != "tag_name"},
         {**metadata, "assets": metadata["assets"][:-1]},
         {
             **metadata,
@@ -471,6 +532,42 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
             release_inventory.validate_remote_inventory(
                 changed, "0.1.0", expected_release_id=41
             )
+
+
+def test_remote_asset_downloads_are_bound_to_validated_asset_ids() -> None:
+    release_inventory = load_release_inventory_module()
+    names = sorted(release_inventory.expected_asset_names("0.1.0"))
+    metadata = {
+        "id": 41,
+        "tag_name": "v0.1.0",
+        "draft": True,
+        "prerelease": False,
+        "assets": [
+            {"id": 100 + index, "name": name}
+            for index, name in enumerate(reversed(names))
+        ],
+    }
+
+    assert release_inventory.remote_asset_downloads(
+        metadata, "0.1.0", expected_release_id=41
+    ) == sorted(
+        (
+            (100 + index, name)
+            for index, name in enumerate(reversed(names))
+        ),
+        key=lambda item: item[1],
+    )
+
+    with pytest.raises(release_inventory.ReleaseInventoryError):
+        release_inventory.remote_asset_downloads(
+            {**metadata, "id": 42}, "0.1.0", expected_release_id=41
+        )
+    with pytest.raises(release_inventory.ReleaseInventoryError):
+        release_inventory.remote_asset_downloads(
+            {**metadata, "tag_name": "v0.1.1"},
+            "0.1.0",
+            expected_release_id=41,
+        )
 
 
 def test_draft_cleanup_returns_only_valid_asset_ids() -> None:
