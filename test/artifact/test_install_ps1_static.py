@@ -28,3 +28,12 @@ def test_native_powershell_test_uses_production_binary_and_isolated_seams() -> N
     assert "127.0.0.1" in source
     assert "NETFT_CLI_TEST_USER_PATH_FILE" in source
     assert "EnvironmentVariableTarget]::User" not in source
+
+
+def test_powershell_installer_streams_downloads_and_zip_entries() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert "HttpCompletionOption]::ResponseHeadersRead" in source
+    assert "ServerCertificateCustomValidationCallback" not in source
+    assert "Expand-Archive" not in source
+    assert "$Entry.Open()" in source

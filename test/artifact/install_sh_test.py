@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tarfile
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,18 @@ MAX_MEMBER_BYTES = 32 * 1024 * 1024
 @dataclass(frozen=True)
 class Redirect:
     location: str
+
+
+@dataclass(frozen=True)
+class StreamingBody:
+    size: int
+    chunk_size: int = 65536
+
+
+@dataclass(frozen=True)
+class DelayedBody:
+    data: bytes
+    delay_seconds: float = 1.0
 
 
 def fake_binary(version: str) -> bytes:
@@ -79,8 +92,10 @@ def checksum_file(files: dict[str, bytes], extra_lines: list[str] | None = None)
 
 
 class FixtureServer(http.server.ThreadingHTTPServer):
-    files: dict[str, bytes | Redirect]
+    files: dict[str, bytes | Redirect | StreamingBody | DelayedBody]
     requests: list[str]
+    bytes_sent: dict[str, int]
+    response_started: threading.Event
 
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):
@@ -95,6 +110,28 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Location", data.location)
             self.end_headers()
             return
+        if isinstance(data, StreamingBody):
+            self.send_response(200)
+            self.end_headers()
+            sent = 0
+            try:
+                while sent < data.size:
+                    chunk = min(data.chunk_size, data.size - sent)
+                    self.wfile.write(b"x" * chunk)
+                    self.wfile.flush()
+                    sent += chunk
+                    self.server.bytes_sent[self.path] = sent  # type: ignore[attr-defined]
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+        if isinstance(data, DelayedBody):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data.data)))
+            self.end_headers()
+            self.server.response_started.set()  # type: ignore[attr-defined]
+            time.sleep(data.delay_seconds)
+            self.wfile.write(data.data)
+            return
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -106,11 +143,13 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 
 @contextmanager
 def release_server(
-    files: dict[str, bytes | Redirect],
+    files: dict[str, bytes | Redirect | StreamingBody | DelayedBody],
 ) -> Iterator[tuple[str, FixtureServer]]:
     server = FixtureServer(("127.0.0.1", 0), FixtureHandler)
     server.files = files
     server.requests = []
+    server.bytes_sent = {}
+    server.response_started = threading.Event()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -187,6 +226,30 @@ def run_installer(
     machine: str = "x86_64",
     path: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    environment = installer_environment(
+        base_url,
+        tmp_path,
+        system=system,
+        machine=machine,
+        path=path,
+    )
+    return subprocess.run(
+        ["/bin/sh", str(INSTALLER), *arguments],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+
+def installer_environment(
+    base_url: str | None,
+    tmp_path: Path,
+    *,
+    system: str = "Linux",
+    machine: str = "x86_64",
+    path: str | None = None,
+) -> dict[str, str]:
     tools = fake_uname(tmp_path / "tools", system, machine)
     environment = os.environ.copy()
     environment.update(
@@ -200,13 +263,7 @@ def run_installer(
         environment.pop("NETFT_CLI_RELEASE_BASE_URL", None)
     else:
         environment["NETFT_CLI_RELEASE_BASE_URL"] = base_url
-    return subprocess.run(
-        ["/bin/sh", str(INSTALLER), *arguments],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
+    return environment
 
 
 @pytest.mark.parametrize(
@@ -453,6 +510,7 @@ def test_install_sh_supports_wget_when_curl_is_unavailable(tmp_path: Path) -> No
         "awk",
         "chmod",
         "cmp",
+        "cp",
         "grep",
         "gzip",
         "mkdir",
@@ -654,6 +712,41 @@ def test_install_sh_lock_contention_preserves_previous_binary(
     assert old.read_bytes() == fake_binary("0.0.9")
 
 
+def test_install_sh_cleanup_preserves_externally_recreated_lock(
+    tmp_path: Path,
+) -> None:
+    files = fixture_files()
+    checksum_path = "/releases/download/v0.1.0/SHA256SUMS"
+    files[checksum_path] = DelayedBody(files[checksum_path])
+    destination = tmp_path / "bin"
+    destination.mkdir()
+
+    with release_server(files) as (base_url, server):
+        process = subprocess.Popen(
+            [
+                "/bin/sh",
+                str(INSTALLER),
+                "--version",
+                "0.1.0",
+                "--bin-dir",
+                str(destination),
+            ],
+            env=installer_environment(base_url, tmp_path),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert server.response_started.wait(timeout=5)
+        lock = destination / ".netft-install.lock"
+        assert lock.is_dir()
+        shutil.rmtree(lock)
+        lock.mkdir()
+        stdout, stderr = process.communicate(timeout=20)
+
+    assert process.returncode == 0, stdout + stderr
+    assert lock.is_dir()
+
+
 def test_release_base_override_rejects_https_before_creating_destination(
     tmp_path: Path,
 ) -> None:
@@ -678,6 +771,7 @@ def restricted_tool_path(directory: Path, *, include_wget: bool = True) -> Path:
         "awk",
         "chmod",
         "cmp",
+        "cp",
         "grep",
         "gzip",
         "mkdir",
@@ -780,3 +874,143 @@ def test_wget_production_rejects_unsafe_redirect_before_following(
 
     assert result.returncode != 0
     assert not marker.exists()
+
+
+def test_real_wget_accepts_exact_loopback_redirect_and_ignores_summary(
+    tmp_path: Path,
+) -> None:
+    restricted = restricted_tool_path(tmp_path / "restricted")
+    archive = release_archive("0.1.0")
+    checksums = checksum_file(
+        release_inventory("0.1.0", "linux-x86_64", archive)
+    )
+    name = asset_name("0.1.0", "linux-x86_64")
+    files: dict[str, bytes | Redirect | StreamingBody] = {}
+    with release_server(files) as (base_url, server):
+        files["/releases/download/v0.1.0/SHA256SUMS"] = Redirect(
+            f"{base_url}/redirected/SHA256SUMS"
+        )
+        files["/releases/redirected/SHA256SUMS"] = checksums
+        files[f"/releases/download/v0.1.0/{name}"] = archive
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(tmp_path / "bin"),
+            path=str(restricted),
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert server.requests[:2] == [
+        "/releases/download/v0.1.0/SHA256SUMS",
+        "/releases/redirected/SHA256SUMS",
+    ]
+
+
+def test_wget_accepts_authentic_production_multi_redirect_shape(
+    tmp_path: Path,
+) -> None:
+    restricted = restricted_tool_path(
+        tmp_path / "restricted",
+        include_wget=False,
+    )
+    archive = tmp_path / "release.tar.gz"
+    archive.write_bytes(release_archive("0.1.0"))
+    checksums = tmp_path / "SHA256SUMS"
+    checksums.write_bytes(
+        checksum_file(
+            release_inventory(
+                "0.1.0",
+                "linux-x86_64",
+                archive.read_bytes(),
+            )
+        )
+    )
+    request_log = tmp_path / "wget-requests"
+    wget = restricted / "wget"
+    wget.write_text(
+        "#!/bin/sh\n"
+        "output=\n"
+        "url=\n"
+        "for argument in \"$@\"; do\n"
+        "  case \"$argument\" in\n"
+        "    --output-document=*) output=${argument#*=} ;;\n"
+        "    http://*|https://*) url=$argument ;;\n"
+        "  esac\n"
+        "done\n"
+        f"printf '%s\\n' \"$url\" >>'{request_log}'\n"
+        "case \"$url\" in\n"
+        "  https://github.com/netft/netft-cli/releases/download/v0.1.0/SHA256SUMS)\n"
+        "    printf '  HTTP/1.1 302 Found\\r\\n' >&2\n"
+        "    printf '  Location: https://download.test/first\\r\\n' >&2\n"
+        "    printf 'Location: https://download.test/first [following]\\n' >&2\n"
+        "    exit 8 ;;\n"
+        "  https://download.test/first)\n"
+        "    printf '  HTTP/2 302\\r\\n' >&2\n"
+        "    printf '  Location: https://download.test/final?sig=a%%2Fb\\r\\n' >&2\n"
+        "    printf 'Location: https://download.test/final?sig=a%%2Fb [following]\\n' >&2\n"
+        "    exit 8 ;;\n"
+        "  https://download.test/final?sig=a%2Fb)\n"
+        "    printf '  HTTP/2 200\\r\\n' >&2\n"
+        f"    cp '{checksums}' \"$output\"; exit 0 ;;\n"
+        "  *netft-cli-0.1.0-linux-x86_64.tar.gz)\n"
+        "    printf '  HTTP/1.1 200 OK\\r\\n' >&2\n"
+        f"    cp '{archive}' \"$output\"; exit 0 ;;\n"
+        "esac\n"
+        "exit 9\n",
+        encoding="utf-8",
+    )
+    wget.chmod(0o755)
+
+    result = run_installer(
+        None,
+        tmp_path,
+        "--version",
+        "0.1.0",
+        "--bin-dir",
+        str(tmp_path / "bin"),
+        path=str(restricted),
+    )
+
+    assert result.returncode == 0, (
+        result.stderr + "\n" + request_log.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize("downloader", ["curl", "wget"])
+def test_download_limit_stops_unbounded_checksum_body_during_transfer(
+    tmp_path: Path, downloader: str
+) -> None:
+    body = StreamingBody(8 * 1024 * 1024)
+    files: dict[str, bytes | Redirect | StreamingBody] = {
+        "/releases/download/v0.1.0/SHA256SUMS": body
+    }
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    old = destination / "netft"
+    old.write_bytes(fake_binary("0.0.9"))
+    old.chmod(0o755)
+    tool_path = (
+        str(restricted_tool_path(tmp_path / "restricted"))
+        if downloader == "wget"
+        else None
+    )
+
+    with release_server(files) as (base_url, server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(destination),
+            path=tool_path,
+        )
+
+    assert result.returncode != 0
+    assert server.bytes_sent[
+        "/releases/download/v0.1.0/SHA256SUMS"
+    ] < body.size
+    assert old.read_bytes() == fake_binary("0.0.9")

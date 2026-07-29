@@ -43,6 +43,59 @@ function Add-ZipFile {
     }
 }
 
+function Set-ZipCentralLength {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][uint32]$Length
+    )
+
+    $Bytes = [IO.File]::ReadAllBytes($Path)
+    $EndOffset = -1
+    for ($Offset = $Bytes.Length - 22; $Offset -ge 0; $Offset--) {
+        if ($Bytes[$Offset] -eq 0x50 -and
+            $Bytes[$Offset + 1] -eq 0x4b -and
+            $Bytes[$Offset + 2] -eq 0x05 -and
+            $Bytes[$Offset + 3] -eq 0x06) {
+            $EndOffset = $Offset
+            break
+        }
+    }
+    if ($EndOffset -lt 0) {
+        throw "ZIP fixture end record was not found."
+    }
+    $EntryCount = [BitConverter]::ToUInt16($Bytes, $EndOffset + 10)
+    $Offset = [int][BitConverter]::ToUInt32($Bytes, $EndOffset + 16)
+    $Found = $false
+    for ($Index = 0; $Index -lt $EntryCount; $Index++) {
+        if ($Offset + 46 -gt $Bytes.Length -or
+            $Bytes[$Offset] -ne 0x50 -or
+            $Bytes[$Offset + 1] -ne 0x4b -or
+            $Bytes[$Offset + 2] -ne 0x01 -or
+            $Bytes[$Offset + 3] -ne 0x02) {
+            throw "ZIP fixture central directory is invalid."
+        }
+        $NameLength = [BitConverter]::ToUInt16($Bytes, $Offset + 28)
+        $ExtraLength = [BitConverter]::ToUInt16($Bytes, $Offset + 30)
+        $CommentLength = [BitConverter]::ToUInt16($Bytes, $Offset + 32)
+        $EntryName = [Text.Encoding]::UTF8.GetString(
+            $Bytes,
+            $Offset + 46,
+            $NameLength
+        )
+        if ($EntryName -ceq $Name) {
+            $EncodedLength = [BitConverter]::GetBytes($Length)
+            [Array]::Copy($EncodedLength, 0, $Bytes, $Offset + 24, 4)
+            $Found = $true
+        }
+        $Offset += 46 + $NameLength + $ExtraLength + $CommentLength
+    }
+    if (-not $Found) {
+        throw "ZIP fixture entry was not found."
+    }
+    [IO.File]::WriteAllBytes($Path, $Bytes)
+}
+
 function New-ReleaseArchive {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -50,7 +103,8 @@ function New-ReleaseArchive {
         [Parameter(Mandatory = $true)][string]$Binary,
         [switch]$Unexpected,
         [switch]$Symlink,
-        [switch]$Oversized
+        [switch]$Oversized,
+        [switch]$ForgedLength
     )
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -86,6 +140,9 @@ function New-ReleaseArchive {
     } finally {
         $Release.Dispose()
     }
+    if ($ForgedLength) {
+        Set-ZipCentralLength $Path "$RootName/LICENSE" 7
+    }
 }
 
 function Publish-Release {
@@ -94,7 +151,8 @@ function Publish-Release {
         [Parameter(Mandatory = $true)][string]$Binary,
         [switch]$Unexpected,
         [switch]$Symlink,
-        [switch]$Oversized
+        [switch]$Oversized,
+        [switch]$ForgedLength
     )
 
     $Name = "netft-cli-$Version-windows-x86_64.zip"
@@ -107,7 +165,8 @@ function Publish-Release {
         $Archive = Join-Path $Directory $Name
         Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
         New-ReleaseArchive $Archive $Version $Binary `
-            -Unexpected:$Unexpected -Symlink:$Symlink -Oversized:$Oversized
+            -Unexpected:$Unexpected -Symlink:$Symlink -Oversized:$Oversized `
+            -ForgedLength:$ForgedLength
         $Digest = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
         $Inventory = @(
             "$(('0' * 64))  netft-cli-$Version-linux-x86_64.tar.gz",
@@ -169,15 +228,37 @@ port = int(sys.argv[1])
 root = pathlib.Path(sys.argv[2]).resolve()
 redirect = root / "redirect.txt"
 request_log = root / "requests.log"
+stream = root / "stream.txt"
+stream_count = root / "stream-count.txt"
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         with request_log.open("a", encoding="utf-8") as stream:
             stream.write(self.path + "\n")
-        if self.path.endswith("/SHA256SUMS") and redirect.exists():
+        if (
+            self.path == "/releases/download/v0.1.0/SHA256SUMS"
+            and redirect.exists()
+        ):
             self.send_response(302)
             self.send_header("Location", redirect.read_text(encoding="utf-8"))
             self.end_headers()
+            return
+        if (
+            self.path == "/releases/download/v0.1.0/SHA256SUMS"
+            and stream.exists()
+        ):
+            self.send_response(200)
+            self.end_headers()
+            sent = 0
+            try:
+                while sent < 8 * 1024 * 1024:
+                    data = b"x" * 65536
+                    self.wfile.write(data)
+                    self.wfile.flush()
+                    sent += len(data)
+                    stream_count.write_text(str(sent), encoding="utf-8")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
         relative = urllib.parse.unquote(self.path.split("?", 1)[0]).lstrip("/")
         path = (root / relative).resolve()
@@ -240,6 +321,35 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         $InstalledVersion[0] -ceq "netft 0.1.0"
     ) "Installed executable reported the wrong version."
 
+    $RedirectFile = Join-Path $FixtureRoot "redirect.txt"
+    $RequestLog = Join-Path $FixtureRoot "requests.log"
+    $RedirectedDirectory = Join-Path $FixtureRoot "releases\redirected"
+    New-Item -ItemType Directory -Path $RedirectedDirectory -Force |
+        Out-Null
+    Copy-Item -LiteralPath (
+        Join-Path $FixtureRoot "releases\download\v0.1.0\SHA256SUMS"
+    ) -Destination (Join-Path $RedirectedDirectory "SHA256SUMS")
+    [IO.File]::WriteAllText(
+        $RedirectFile,
+        "$BaseUrl/redirected/SHA256SUMS"
+    )
+    [IO.File]::WriteAllText($RequestLog, "")
+    $SameOriginRedirect = Invoke-InstallerProcess -Arguments @(
+        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+    )
+    $SameOriginRequests = @(
+        [IO.File]::ReadAllLines($RequestLog) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    Assert-True (
+        $SameOriginRedirect.ExitCode -eq 0 -and
+        $SameOriginRequests.Count -ge 2 -and
+        $SameOriginRequests[0] -ceq
+            "/releases/download/v0.1.0/SHA256SUMS" -and
+        $SameOriginRequests[1] -ceq "/releases/redirected/SHA256SUMS"
+    ) "An exact same-origin loopback redirect was not followed."
+    Remove-Item -LiteralPath $RedirectFile -Force
+
     $PathFile = $env:NETFT_CLI_TEST_USER_PATH_FILE
     [IO.File]::WriteAllText(
         $PathFile,
@@ -278,6 +388,23 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         "A checksum mismatch was accepted."
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "A failed checksum update replaced the previous executable."
+
+    Publish-Release "0.1.0" $GoodBinary
+    $StreamFlag = Join-Path $FixtureRoot "stream.txt"
+    $StreamCount = Join-Path $FixtureRoot "stream-count.txt"
+    [IO.File]::WriteAllText($StreamFlag, "")
+    Remove-Item -LiteralPath $StreamCount -Force -ErrorAction SilentlyContinue
+    $StreamFailure = Invoke-InstallerProcess -Arguments @(
+        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+    )
+    Remove-Item -LiteralPath $StreamFlag -Force
+    $Transferred = [long][IO.File]::ReadAllText($StreamCount)
+    Assert-True (
+        $StreamFailure.ExitCode -ne 0 -and
+        $Transferred -lt 8 * 1024 * 1024
+    ) "An unbounded checksum response was consumed in full."
+    Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
+        "An oversized checksum response replaced the previous executable."
 
     Publish-Release "0.1.0" $GoodBinary -Unexpected
     $ArchiveFailure = Invoke-InstallerProcess -Arguments @(
@@ -332,6 +459,15 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         "An oversized ZIP member was accepted."
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "An oversized archive replaced the previous executable."
+
+    Publish-Release "0.1.0" $GoodBinary -Oversized -ForgedLength
+    $ForgedLengthFailure = Invoke-InstallerProcess -Arguments @(
+        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+    )
+    Assert-True ($ForgedLengthFailure.ExitCode -ne 0) `
+        "A ZIP member with forged length metadata was accepted."
+    Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
+        "A forged archive replaced the previous executable."
 
     Publish-Release "0.1.0" $GoodBinary
     $LockPath = Join-Path $CustomBin ".netft-install.lock"
@@ -417,12 +553,11 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     ) "A non-loopback release-base override was accepted."
     $env:NETFT_CLI_RELEASE_BASE_URL = $BaseUrl
 
-    $RedirectFile = Join-Path $FixtureRoot "redirect.txt"
-    $RequestLog = Join-Path $FixtureRoot "requests.log"
     foreach ($RedirectLocation in @(
         "http://localhost:$Port/escaped",
         "http://127.0.0.2:$Port/escaped",
         "http://[::1]:$Port/escaped",
+        "http://127.0.0.1:$($Port + 1)/escaped",
         "https://example.com/escaped"
     )) {
         [IO.File]::WriteAllText($RedirectFile, $RedirectLocation)

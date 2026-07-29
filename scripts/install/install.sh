@@ -60,22 +60,37 @@ download() {
   max_bytes=$3
   validate_download_url "$url"
   if command -v curl >/dev/null 2>&1; then
+    part_output=$output.part
+    rm -f "$part_output"
+    file_block_limit=$(((max_bytes + 511) / 512))
     if [ "$release_transport" = production ]; then
-      if ! curl --fail --location --silent --show-error \
-        --proto '=https' --proto-redir '=https' --output "$output" "$url"; then
+      if ! (
+        ulimit -c 0 2>/dev/null || :
+        ulimit -f "$file_block_limit" 2>/dev/null || exit 1
+        curl --fail --location --silent --show-error \
+          --proto '=https' --proto-redir '=https' \
+          --output "$part_output" "$url"
+      ); then
         die "curl failed while downloading a release file"
       fi
     else
-      if ! curl --fail --location --max-redirs 0 --silent --show-error \
-        --proto '=http' --proto-redir '=http' --output "$output" "$url"; then
+      if ! (
+        ulimit -c 0 2>/dev/null || :
+        ulimit -f "$file_block_limit" 2>/dev/null || exit 1
+        curl --fail --location --max-redirs 0 --silent --show-error \
+          --proto '=http' --proto-redir '=http' \
+          --output "$part_output" "$url"
+      ); then
         die "curl failed while downloading a release file"
       fi
     fi
-    assert_file_within_limit "$output" "$max_bytes"
+    assert_file_within_limit "$part_output" "$max_bytes"
+    mv -f "$part_output" "$output" ||
+      die "unable to finalize downloaded file"
     return
   fi
   if command -v wget >/dev/null 2>&1; then
-    download_with_wget "$url" "$output"
+    download_with_wget "$url" "$output" "$max_bytes"
     assert_file_within_limit "$output" "$max_bytes"
     return
   fi
@@ -123,6 +138,8 @@ validate_download_url() {
     die "release fixture redirect escaped exact loopback"
   loopback_authority=${candidate_url#http://}
   loopback_authority=${loopback_authority%%/*}
+  [ "$loopback_authority" = "$fixture_authority" ] ||
+    die "release fixture redirect changed authority"
   loopback_port=${loopback_authority##*:}
   [ "${#loopback_port}" -le 5 ] &&
     [ "$loopback_port" -ge 1 ] &&
@@ -146,20 +163,29 @@ assert_file_within_limit() {
 download_with_wget() {
   current_url=$1
   final_output=$2
+  max_bytes=$3
   redirect_count=0
+  file_block_limit=$(((max_bytes + 511) / 512))
   part_output=$final_output.part
   header_output=$final_output.headers
   while :; do
     rm -f "$part_output" "$header_output"
-    if wget --server-response --max-redirect=0 \
-      --output-document="$part_output" "$current_url" 2>"$header_output"; then
+    if (
+      ulimit -c 0 2>/dev/null || :
+      ulimit -f "$file_block_limit" 2>/dev/null || exit 1
+      wget --server-response --max-redirect=0 \
+        --output-document="$part_output" "$current_url" 2>"$header_output"
+    ); then
       wget_result=0
     else
       wget_result=$?
     fi
     response_status=$(
       awk '
-        /^[[:space:]]*HTTP\/[0-9.]+ [0-9][0-9][0-9]/ { status = $2 }
+        /^[[:space:]]*HTTP\/[0-9.]+ [0-9][0-9][0-9]/ {
+          status = $2
+          sub(/\r$/, "", status)
+        }
         END { print status }
       ' "$header_output"
     )
@@ -167,21 +193,26 @@ download_with_wget() {
       2??)
         [ "$wget_result" -eq 0 ] ||
           die "wget failed while downloading a release file"
+        assert_file_within_limit "$part_output" "$max_bytes"
         mv -f "$part_output" "$final_output" ||
           die "unable to finalize downloaded file"
         rm -f "$header_output"
         return
         ;;
       301 | 302 | 303 | 307 | 308)
-        [ "$release_transport" = production ] ||
-          die "loopback release fixtures must not redirect"
         [ "$redirect_count" -lt "$MAX_REDIRECTS" ] ||
           die "release download exceeded the redirect limit"
         if ! redirect_url=$(
           awk '
             BEGIN { IGNORECASE = 1 }
-            /^[[:space:]]*Location:/ {
-              sub(/^[[:space:]]*Location:[[:space:]]*/, "")
+            /^[[:space:]]+HTTP\/[0-9.]+ [0-9][0-9][0-9]/ {
+              location = ""
+              count = 0
+              next
+            }
+            /^[[:space:]]+Location:/ {
+              sub(/^[[:space:]]+Location:[[:space:]]*/, "")
+              sub(/[[:space:]]+\[following\]\r?$/, "")
               sub(/\r$/, "")
               location = $0
               count++
@@ -196,11 +227,9 @@ download_with_wget() {
         ); then
           die "release redirect must contain exactly one Location"
         fi
-        case "$redirect_url" in
-          https://*) ;;
-          *)
-            die "relative or non-HTTPS release redirects are not accepted"
-            ;;
+        case "$release_transport:$redirect_url" in
+          production:https://* | loopback:http://*) ;;
+          *) die "relative or downgraded release redirects are not accepted" ;;
         esac
         validate_download_url "$redirect_url"
         current_url=$redirect_url
@@ -363,6 +392,7 @@ bounded_extract_member() {
   member_block_limit=$(((MAX_MEMBER_BYTES + 511) / 512))
   rm -f "$bounded_output"
   if ! (
+    ulimit -c 0 2>/dev/null || :
     ulimit -f "$member_block_limit" 2>/dev/null || exit 1
     tar -xOzf "$bounded_archive" "$bounded_member" >"$bounded_output"
   ); then
@@ -436,6 +466,12 @@ case "$release_transport:$base_url" in
     die "release base URL must use HTTPS"
     ;;
 esac
+if [ "$release_transport" = loopback ]; then
+  fixture_authority=${base_url#http://}
+  fixture_authority=${fixture_authority%%/*}
+else
+  fixture_authority=
+fi
 
 if [ -L "$bin_dir" ]; then
   die "installation directory must not be a symbolic link"
@@ -448,11 +484,15 @@ fi
 temporary=
 lock_path=$bin_dir/.netft-install.lock
 lock_acquired=0
+lock_owner_path=
 cleanup() {
   if [ -n "$temporary" ]; then
     rm -rf "$temporary"
   fi
-  if [ "$lock_acquired" -eq 1 ]; then
+  if [ "$lock_acquired" -eq 1 ] &&
+    [ -f "$lock_owner_path" ] &&
+    [ ! -L "$lock_owner_path" ]; then
+    rm -f "$lock_owner_path"
     rmdir "$lock_path" 2>/dev/null || :
   fi
 }
@@ -463,8 +503,17 @@ trap 'exit 143' TERM
 mkdir "$lock_path" 2>/dev/null ||
   die "another installer is active for this destination"
 lock_acquired=1
-temporary=$(mktemp -d "$bin_dir/.netft-install.XXXXXX") ||
+if ! temporary=$(mktemp -d "$bin_dir/.netft-install.XXXXXX"); then
+  rmdir "$lock_path" 2>/dev/null || :
+  lock_acquired=0
   die "unable to create installation staging directory"
+fi
+lock_owner_path=$lock_path/${temporary##*/}
+if ! : >"$lock_owner_path"; then
+  rmdir "$lock_path" 2>/dev/null || :
+  lock_acquired=0
+  die "unable to record installer lock ownership"
+fi
 
 checksums=$temporary/SHA256SUMS
 seen=$temporary/checksum-names

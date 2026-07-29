@@ -26,6 +26,7 @@ $HadPreviousBinary = $false
 $PathUpdateAttempted = $false
 $OriginalUserPath = $null
 $InstallLock = $null
+$FixtureAuthority = $null
 $VersionWasProvided = $PSBoundParameters.ContainsKey("Version")
 $BinDirWasProvided = $PSBoundParameters.ContainsKey("BinDir")
 
@@ -63,58 +64,80 @@ function Invoke-ReleaseDownload {
         [Parameter(Mandatory = $true)][long]$MaxBytes
     )
 
+    Add-Type -AssemblyName System.Net.Http
+    $Handler = [Net.Http.HttpClientHandler]::new()
+    $Handler.AllowAutoRedirect = $false
+    $Client = [Net.Http.HttpClient]::new($Handler, $true)
     $Current = $Uri
     $RedirectCount = 0
     $Part = "$Output.part"
-    while ($true) {
-        Assert-ReleaseUri $Current
+    $Buffer = [byte[]]::new(65536)
+    try {
+        while ($true) {
+            Assert-ReleaseUri $Current
+            Remove-Item -LiteralPath $Part -Force -ErrorAction SilentlyContinue
+            $Response = $Client.GetAsync(
+                $Current,
+                [Net.Http.HttpCompletionOption]::ResponseHeadersRead
+            ).GetAwaiter().GetResult()
+            try {
+                $StatusCode = [int]$Response.StatusCode
+                if ($StatusCode -ge 200 -and $StatusCode -lt 300) {
+                    $InputStream = $Response.Content.ReadAsStreamAsync(
+                    ).GetAwaiter().GetResult()
+                    try {
+                        $OutputStream = [IO.FileStream]::new(
+                            $Part,
+                            [IO.FileMode]::CreateNew,
+                            [IO.FileAccess]::Write,
+                            [IO.FileShare]::None
+                        )
+                        try {
+                            $Written = [long]0
+                            while (($Read = $InputStream.Read(
+                                $Buffer,
+                                0,
+                                $Buffer.Length
+                            )) -gt 0) {
+                                if ($Written + $Read -gt $MaxBytes) {
+                                    throw "Downloaded file exceeds the installer size limit."
+                                }
+                                $OutputStream.Write($Buffer, 0, $Read)
+                                $Written += $Read
+                            }
+                        } finally {
+                            $OutputStream.Dispose()
+                        }
+                    } finally {
+                        $InputStream.Dispose()
+                    }
+                    [IO.File]::Move($Part, $Output)
+                    return
+                }
+                if ($StatusCode -notin @(301, 302, 303, 307, 308)) {
+                    throw "Release download returned HTTP $StatusCode."
+                }
+                if ($RedirectCount -ge $MaxRedirects) {
+                    throw "Release download exceeded the redirect limit."
+                }
+                $Location = $Response.Headers.Location
+                if ($null -eq $Location) {
+                    throw "Release redirect is missing Location."
+                }
+                $Current = if ($Location.IsAbsoluteUri) {
+                    $Location
+                } else {
+                    [uri]::new($Current, $Location)
+                }
+                Assert-ReleaseUri $Current
+                $RedirectCount++
+            } finally {
+                $Response.Dispose()
+            }
+        }
+    } finally {
+        $Client.Dispose()
         Remove-Item -LiteralPath $Part -Force -ErrorAction SilentlyContinue
-        $Response = $null
-        $RequestError = $null
-        try {
-            $Response = Invoke-WebRequest -Uri $Current -OutFile $Part `
-                -UseBasicParsing -MaximumRedirection 0 -PassThru
-        } catch {
-            $RequestError = $_.Exception
-            if ($_.Exception.Response) {
-                $Response = $_.Exception.Response
-            } else {
-                throw
-            }
-        }
-        $StatusCode = [int]$Response.StatusCode
-        if ($StatusCode -ge 200 -and $StatusCode -lt 300) {
-            if ($RequestError) {
-                throw $RequestError
-            }
-            $Length = (Get-Item -LiteralPath $Part).Length
-            if ($Length -gt $MaxBytes) {
-                throw "Downloaded file exceeds the installer size limit."
-            }
-            [IO.File]::Move($Part, $Output)
-            return
-        }
-        if ($StatusCode -notin @(301, 302, 303, 307, 308)) {
-            throw "Release download returned HTTP $StatusCode."
-        }
-        if ($IsLoopbackFixture) {
-            throw "Loopback release fixtures must not redirect."
-        }
-        if ($RedirectCount -ge $MaxRedirects) {
-            throw "Release download exceeded the redirect limit."
-        }
-        $Location = $null
-        if ($Response.Headers.PSObject.Properties.Name -contains "Location") {
-            $Location = [string]$Response.Headers.Location
-        } else {
-            $Location = [string]$Response.Headers["Location"]
-        }
-        if ([string]::IsNullOrWhiteSpace($Location)) {
-            throw "Release redirect is missing Location."
-        }
-        $Current = [uri]::new($Current, $Location)
-        Assert-ReleaseUri $Current
-        $RedirectCount++
     }
 }
 
@@ -132,7 +155,8 @@ function Assert-ReleaseUri {
     if ($IsLoopbackFixture) {
         if ($Uri.Scheme -cne "http" -or
             $Uri.Host -cne "127.0.0.1" -or
-            $Uri.IsDefaultPort) {
+            $Uri.IsDefaultPort -or
+            $Uri.Authority -cne $FixtureAuthority) {
             throw "Release fixture escaped exact loopback."
         }
         return
@@ -192,10 +216,11 @@ function Assert-ChecksumContract {
     }
 }
 
-function Assert-ZipPayload {
+function Expand-CheckedZip {
     param(
         [Parameter(Mandatory = $true)][string]$Archive,
-        [Parameter(Mandatory = $true)][string]$ReleaseVersion
+        [Parameter(Mandatory = $true)][string]$ReleaseVersion,
+        [Parameter(Mandatory = $true)][string]$DestinationDirectory
     )
 
     $ArchiveLength = (Get-Item -LiteralPath $Archive).Length
@@ -212,7 +237,8 @@ function Assert-ZipPayload {
     )
     $Release = [IO.Compression.ZipFile]::OpenRead($Archive)
     try {
-        $ExpandedLength = [long]0
+        $DeclaredExpandedLength = [long]0
+        $ActualExpandedLength = [long]0
         $Names = @($Release.Entries | ForEach-Object { $_.FullName })
         if ($Names.Count -ne $Expected.Count) {
             throw "Release archive payload does not match the release contract."
@@ -225,13 +251,56 @@ function Assert-ZipPayload {
             if ($Entry.Length -lt 0 -or $Entry.Length -gt $MaxMemberBytes) {
                 throw "Release archive member exceeds its size limit."
             }
-            $ExpandedLength += $Entry.Length
-            if ($ExpandedLength -gt $MaxExpandedBytes) {
+            $DeclaredExpandedLength += $Entry.Length
+            if ($DeclaredExpandedLength -gt $MaxExpandedBytes) {
                 throw "Release archive exceeds its expanded size limit."
             }
             $UnixType = ($Entry.ExternalAttributes -shr 16) -band 0xF000
             if ($UnixType -ne 0x8000) {
                 throw "Release archive members must be regular files."
+            }
+
+            $OutputPath = Join-Path $DestinationDirectory (
+                $Expected[$Index].Replace("/", [IO.Path]::DirectorySeparatorChar)
+            )
+            $OutputDirectory = [IO.Path]::GetDirectoryName($OutputPath)
+            New-Item -ItemType Directory -Path $OutputDirectory -Force |
+                Out-Null
+            $InputStream = $Entry.Open()
+            try {
+                $OutputStream = [IO.FileStream]::new(
+                    $OutputPath,
+                    [IO.FileMode]::CreateNew,
+                    [IO.FileAccess]::Write,
+                    [IO.FileShare]::None
+                )
+                try {
+                    $MemberLength = [long]0
+                    $Buffer = [byte[]]::new(65536)
+                    while (($Read = $InputStream.Read(
+                        $Buffer,
+                        0,
+                        $Buffer.Length
+                    )) -gt 0) {
+                        if ($MemberLength + $Read -gt $MaxMemberBytes) {
+                            throw "Release archive member exceeds its size limit."
+                        }
+                        if ($ActualExpandedLength + $Read -gt
+                            $MaxExpandedBytes) {
+                            throw "Release archive exceeds its expanded size limit."
+                        }
+                        $OutputStream.Write($Buffer, 0, $Read)
+                        $MemberLength += $Read
+                        $ActualExpandedLength += $Read
+                    }
+                } finally {
+                    $OutputStream.Dispose()
+                }
+            } finally {
+                $InputStream.Dispose()
+            }
+            if ($MemberLength -ne $Entry.Length) {
+                throw "Release archive member length does not match its metadata."
             }
         }
     } finally {
@@ -380,6 +449,11 @@ try {
     }
     $BaseUri = [uri]$BaseUrlText
     $IsLoopbackFixture = $ReleaseBaseOverride
+    $FixtureAuthority = if ($IsLoopbackFixture) {
+        $BaseUri.Authority
+    } else {
+        $null
+    }
     Assert-ReleaseUri $BaseUri
 
     if (Test-Path -LiteralPath $BinDir) {
@@ -464,9 +538,9 @@ try {
         throw "Checksum mismatch for $SelectedName."
     }
 
-    Assert-ZipPayload $Archive $SelectedVersion
     $Extracted = Join-Path $Temporary "extracted"
-    Expand-Archive -LiteralPath $Archive -DestinationPath $Extracted
+    New-Item -ItemType Directory -Path $Extracted | Out-Null
+    Expand-CheckedZip $Archive $SelectedVersion $Extracted
     Assert-ExpandedPayload $Extracted $SelectedVersion
     $Candidate = Join-Path $Extracted "netft-cli-$SelectedVersion\netft.exe"
     if (-not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
