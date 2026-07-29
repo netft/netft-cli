@@ -27,7 +27,9 @@ netft_enable_sanitizers(netft_cli_options)
 
 add_library(netft_cli_output
   src/sensor/netft_backend.cpp
+  src/platform/clock.cpp
   src/platform/interrupt.cpp
+  src/monitor/latest_sample.cpp
   src/output/records.cpp
   src/output/context.cpp
   src/output/json.cpp
@@ -45,7 +47,10 @@ target_link_libraries(netft_cli_output PUBLIC netft_core netft_cli_options)
 netft_enable_warnings(netft_cli_output)
 netft_enable_sanitizers(netft_cli_output)
 
-add_library(netft_cli_commands src/commands/info.cpp)
+add_library(netft_cli_commands
+  src/commands/info.cpp
+  src/commands/monitor.cpp
+)
 target_compile_features(netft_cli_commands PUBLIC cxx_std_17)
 target_include_directories(netft_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(netft_cli_commands PUBLIC netft_cli_output)
@@ -109,6 +114,17 @@ if(BUILD_TESTING)
     add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
   endforeach()
 
+  add_executable(netft_latest_sample_test test/unit/latest_sample_test.cpp)
+  target_compile_features(netft_latest_sample_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_latest_sample_test PRIVATE
+    netft_cli_output
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_latest_sample_test)
+  netft_enable_sanitizers(netft_latest_sample_test)
+  add_test(NAME netft_latest_sample COMMAND netft_latest_sample_test)
+
   add_executable(netft_info_test test/unit/info_command_test.cpp)
   target_compile_features(netft_info_test PRIVATE cxx_std_17)
   target_link_libraries(netft_info_test PRIVATE
@@ -120,6 +136,18 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_info_test)
   netft_enable_sanitizers(netft_info_test)
   add_test(NAME netft_info COMMAND netft_info_test)
+
+  add_executable(netft_monitor_test test/unit/monitor_command_test.cpp)
+  target_compile_features(netft_monitor_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_monitor_test PRIVATE
+    netft_cli_commands
+    netft_cli_output
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_monitor_test)
+  netft_enable_sanitizers(netft_monitor_test)
+  add_test(NAME netft_monitor COMMAND netft_monitor_test)
 
   add_test(
     NAME sync_core
