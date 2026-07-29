@@ -84,6 +84,25 @@ TEST(InfoCommand, OpensOutputBeforeDiscoveringSensor) {
   EXPECT_EQ(backend.discover_calls(), 0U);
 }
 
+class UnsupportedInfoFormatTest : public testing::TestWithParam<OutputFormat> {};
+
+TEST_P(UnsupportedInfoFormatTest, RejectsDirectRunBeforeOpeningOutputOrContactingSensor) {
+  test::FakeBackend backend;
+  auto options = test::info_options();
+  options.format = GetParam();
+  options.output =
+      std::filesystem::path(testing::TempDir()) / "netft-info-invalid-format" / "info.json";
+  test::MemoryOutput output(false);
+
+  test::expect_app_error(ExitCode::Usage, [&] { run_info(options, backend, output.context()); });
+  EXPECT_EQ(backend.discover_calls(), 0U);
+  EXPECT_EQ(backend.open_calls(), 0U);
+}
+
+INSTANTIATE_TEST_SUITE_P(DirectRun, UnsupportedInfoFormatTest,
+                         testing::Values(OutputFormat::Table, OutputFormat::Ndjson,
+                                         OutputFormat::Csv));
+
 TEST(InfoCommand, MapsDiscoveryFailureToExitThree) {
   test::FakeBackend backend;
   backend.fail_discovery();
@@ -91,6 +110,7 @@ TEST(InfoCommand, MapsDiscoveryFailureToExitThree) {
 
   test::expect_app_error(ExitCode::Discovery,
                          [&] { run_info(test::info_options(), backend, output.context()); });
+  EXPECT_EQ(backend.discover_calls(), 1U);
 }
 
 } // namespace

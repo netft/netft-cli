@@ -12,11 +12,19 @@ namespace netft_cli {
 namespace {
 
 OutputFormat resolve_format(const InfoOptions &options, const OutputContext &output) {
-  if (options.format != OutputFormat::Automatic) {
+  switch (options.format) {
+  case OutputFormat::Automatic:
+    return !options.output.has_value() && output.output_is_terminal ? OutputFormat::Text
+                                                                    : OutputFormat::Json;
+  case OutputFormat::Text:
+  case OutputFormat::Json:
     return options.format;
+  case OutputFormat::Table:
+  case OutputFormat::Ndjson:
+  case OutputFormat::Csv:
+    throw AppError{ExitCode::Usage, "output format is not supported by this command"};
   }
-  return !options.output.has_value() && output.output_is_terminal ? OutputFormat::Text
-                                                                  : OutputFormat::Json;
+  throw AppError{ExitCode::Usage, "output format is not supported by this command"};
 }
 
 netft::SensorConfiguration discover(const InfoOptions &options, SensorBackend &backend) {
@@ -30,12 +38,13 @@ netft::SensorConfiguration discover(const InfoOptions &options, SensorBackend &b
 } // namespace
 
 int run_info(const InfoOptions &options, SensorBackend &backend, OutputContext &output) {
+  const OutputFormat format = resolve_format(options, output);
   OutputHandle destination = options.output.has_value()
                                  ? OutputHandle::file(*options.output)
                                  : OutputHandle::standard(output.standard_output);
   const auto record = make_configuration_record(options.connection, discover(options, backend));
 
-  switch (resolve_format(options, output)) {
+  switch (format) {
   case OutputFormat::Text:
     destination.stream() << render_configuration_text(record);
     break;
