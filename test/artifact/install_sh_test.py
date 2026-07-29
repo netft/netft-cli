@@ -25,6 +25,7 @@ MAX_MEMBER_BYTES = 32 * 1024 * 1024
 @dataclass(frozen=True)
 class Redirect:
     location: str
+    header_name: str = "Location"
 
 
 @dataclass(frozen=True)
@@ -107,7 +108,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
             return
         if isinstance(data, Redirect):
             self.send_response(302)
-            self.send_header("Location", data.location)
+            self.send_header(data.header_name, data.location)
             self.end_headers()
             return
         if isinstance(data, StreamingBody):
@@ -513,9 +514,11 @@ def test_install_sh_supports_wget_when_curl_is_unavailable(tmp_path: Path) -> No
         "cp",
         "grep",
         "gzip",
+        "ln",
         "mkdir",
         "mktemp",
         "mv",
+        "readlink",
         "rm",
         "sha256sum",
         "tar",
@@ -661,6 +664,7 @@ def test_install_sh_does_not_remove_foreign_lock_symlink(
     assert server.requests == []
     assert lock.is_symlink()
     assert foreign.is_dir()
+    assert list(foreign.iterdir()) == []
 
 
 def test_install_sh_rejects_oversized_uninstalled_member_and_preserves_binary(
@@ -712,7 +716,7 @@ def test_install_sh_lock_contention_preserves_previous_binary(
     assert old.read_bytes() == fake_binary("0.0.9")
 
 
-def test_install_sh_cleanup_preserves_externally_recreated_lock(
+def test_install_sh_cleanup_preserves_externally_recreated_lock_symlink(
     tmp_path: Path,
 ) -> None:
     files = fixture_files()
@@ -738,22 +742,37 @@ def test_install_sh_cleanup_preserves_externally_recreated_lock(
         )
         assert server.response_started.wait(timeout=5)
         lock = destination / ".netft-install.lock"
-        assert lock.is_dir()
-        shutil.rmtree(lock)
-        lock.mkdir()
+        assert lock.is_symlink()
+        own_token = os.readlink(lock)
+        assert "/" not in own_token
+        assert not (destination / own_token).exists()
+        lock.unlink()
+        lock.symlink_to("foreign-owner-token")
         stdout, stderr = process.communicate(timeout=20)
 
     assert process.returncode == 0, stdout + stderr
-    assert lock.is_dir()
+    assert lock.is_symlink()
+    assert os.readlink(lock) == "foreign-owner-token"
 
 
-def test_release_base_override_rejects_https_before_creating_destination(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://127.0.0.1:443/releases",
+        "http://127.0.0.1:0/releases",
+        "http://127.0.0.1:65536/releases",
+        "http://127.0.0.1:999999/releases",
+        "http://user@127.0.0.1:1234/releases",
+        "http://127.0.0.1:1234/releases#fragment",
+    ],
+)
+def test_release_base_override_is_validated_before_creating_destination(
+    tmp_path: Path, base_url: str
 ) -> None:
     destination = tmp_path / "bin"
 
     result = run_installer(
-        "https://127.0.0.1:1/releases",
+        base_url,
         tmp_path,
         "--version",
         "0.1.0",
@@ -774,9 +793,11 @@ def restricted_tool_path(directory: Path, *, include_wget: bool = True) -> Path:
         "cp",
         "grep",
         "gzip",
+        "ln",
         "mkdir",
         "mktemp",
         "mv",
+        "readlink",
         "rm",
         "sha256sum",
         "tar",
@@ -876,8 +897,9 @@ def test_wget_production_rejects_unsafe_redirect_before_following(
     assert not marker.exists()
 
 
-def test_real_wget_accepts_exact_loopback_redirect_and_ignores_summary(
-    tmp_path: Path,
+@pytest.mark.parametrize("header_name", ["location", "lOcAtIoN"])
+def test_real_wget_accepts_case_insensitive_loopback_location_header(
+    tmp_path: Path, header_name: str
 ) -> None:
     restricted = restricted_tool_path(tmp_path / "restricted")
     archive = release_archive("0.1.0")
@@ -888,7 +910,8 @@ def test_real_wget_accepts_exact_loopback_redirect_and_ignores_summary(
     files: dict[str, bytes | Redirect | StreamingBody] = {}
     with release_server(files) as (base_url, server):
         files["/releases/download/v0.1.0/SHA256SUMS"] = Redirect(
-            f"{base_url}/redirected/SHA256SUMS"
+            f"{base_url}/redirected/SHA256SUMS",
+            header_name=header_name,
         )
         files["/releases/redirected/SHA256SUMS"] = checksums
         files[f"/releases/download/v0.1.0/{name}"] = archive
@@ -943,13 +966,15 @@ def test_wget_accepts_authentic_production_multi_redirect_shape(
         f"printf '%s\\n' \"$url\" >>'{request_log}'\n"
         "case \"$url\" in\n"
         "  https://github.com/netft/netft-cli/releases/download/v0.1.0/SHA256SUMS)\n"
+        "    printf '  HTTP/1.1 100 Continue\\r\\n' >&2\n"
+        "    printf '  location: https://download.test/stale\\r\\n' >&2\n"
         "    printf '  HTTP/1.1 302 Found\\r\\n' >&2\n"
-        "    printf '  Location: https://download.test/first\\r\\n' >&2\n"
+        "    printf '  lOcAtIoN: https://download.test/first\\r\\n' >&2\n"
         "    printf 'Location: https://download.test/first [following]\\n' >&2\n"
         "    exit 8 ;;\n"
         "  https://download.test/first)\n"
         "    printf '  HTTP/2 302\\r\\n' >&2\n"
-        "    printf '  Location: https://download.test/final?sig=a%%2Fb\\r\\n' >&2\n"
+        "    printf '  location: https://download.test/final?sig=a%%2Fb\\r\\n' >&2\n"
         "    printf 'Location: https://download.test/final?sig=a%%2Fb [following]\\n' >&2\n"
         "    exit 8 ;;\n"
         "  https://download.test/final?sig=a%2Fb)\n"

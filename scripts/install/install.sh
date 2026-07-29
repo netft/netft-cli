@@ -182,7 +182,7 @@ download_with_wget() {
     fi
     response_status=$(
       awk '
-        /^[[:space:]]*HTTP\/[0-9.]+ [0-9][0-9][0-9]/ {
+        tolower($0) ~ /^[[:space:]]*http\/[0-9.]+ [0-9][0-9][0-9]/ {
           status = $2
           sub(/\r$/, "", status)
         }
@@ -204,17 +204,17 @@ download_with_wget() {
           die "release download exceeded the redirect limit"
         if ! redirect_url=$(
           awk '
-            BEGIN { IGNORECASE = 1 }
-            /^[[:space:]]+HTTP\/[0-9.]+ [0-9][0-9][0-9]/ {
+            tolower($0) ~ /^[[:space:]]+http\/[0-9.]+ [0-9][0-9][0-9]/ {
               location = ""
               count = 0
               next
             }
-            /^[[:space:]]+Location:/ {
-              sub(/^[[:space:]]+Location:[[:space:]]*/, "")
-              sub(/[[:space:]]+\[following\]\r?$/, "")
-              sub(/\r$/, "")
-              location = $0
+            tolower($0) ~ /^[[:space:]]+location:[[:space:]]*/ {
+              value = $0
+              sub(/^[[:space:]]+[^:]*:[[:space:]]*/, "", value)
+              sub(/[[:space:]]+\[following\]\r?$/, "", value)
+              sub(/\r$/, "", value)
+              location = value
               count++
             }
             END {
@@ -472,6 +472,7 @@ if [ "$release_transport" = loopback ]; then
 else
   fixture_authority=
 fi
+validate_download_url "$base_url"
 
 if [ -L "$bin_dir" ]; then
   die "installation directory must not be a symbolic link"
@@ -484,36 +485,40 @@ fi
 temporary=
 lock_path=$bin_dir/.netft-install.lock
 lock_acquired=0
-lock_owner_path=
+lock_token=
 cleanup() {
   if [ -n "$temporary" ]; then
     rm -rf "$temporary"
   fi
   if [ "$lock_acquired" -eq 1 ] &&
-    [ -f "$lock_owner_path" ] &&
-    [ ! -L "$lock_owner_path" ]; then
-    rm -f "$lock_owner_path"
-    rmdir "$lock_path" 2>/dev/null || :
+    [ -L "$lock_path" ]; then
+    observed_lock_token=$(readlink "$lock_path" 2>/dev/null || :)
+    if [ "$observed_lock_token" = "$lock_token" ]; then
+      rm -f "$lock_path" 2>/dev/null || :
+    fi
   fi
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-mkdir "$lock_path" 2>/dev/null ||
-  die "another installer is active for this destination"
-lock_acquired=1
 if ! temporary=$(mktemp -d "$bin_dir/.netft-install.XXXXXX"); then
-  rmdir "$lock_path" 2>/dev/null || :
-  lock_acquired=0
   die "unable to create installation staging directory"
 fi
-lock_owner_path=$lock_path/${temporary##*/}
-if ! : >"$lock_owner_path"; then
-  rmdir "$lock_path" 2>/dev/null || :
-  lock_acquired=0
-  die "unable to record installer lock ownership"
+lock_token=netft-owner-${temporary##*/}
+# GNU ln uses -T and BSD/macOS ln uses -h to avoid following a
+# destination symlink. The fallback precheck also rejects every existing type.
+if ! ln -sT "$lock_token" "$lock_path" 2>/dev/null; then
+  if [ -e "$lock_path" ] || [ -L "$lock_path" ] ||
+    ! ln -sh "$lock_token" "$lock_path" 2>/dev/null; then
+    die "another installer is active for this destination"
+  fi
 fi
+if [ ! -L "$lock_path" ] ||
+  [ "$(readlink "$lock_path" 2>/dev/null || :)" != "$lock_token" ]; then
+  die "unable to acquire installer lock"
+fi
+lock_acquired=1
 
 checksums=$temporary/SHA256SUMS
 seen=$temporary/checksum-names
