@@ -44,7 +44,6 @@ public:
     });
   }
   void stop() noexcept override { client_.stop(); }
-  void stop_and_hold_port() noexcept override { client_.stop_and_hold_port(); }
   netft::HealthSnapshot health() const override { return client_.health(); }
 
 private:
@@ -62,8 +61,17 @@ std::unique_ptr<SensorSession> NetftBackend::open(const ConnectionOptions &optio
   return std::make_unique<NetftSession>(client_config(options));
 }
 
+std::unique_ptr<SensorSession> NetftBackend::open_preview(const ConnectionOptions &options) {
+  auto config = client_config(options);
+  config.recovery_policy = netft::RecoveryPolicy::FailStop;
+  config.retain_bound_socket_until_destruction = true;
+  return std::make_unique<NetftSession>(std::move(config));
+}
+
 std::unique_ptr<SensorSession> NetftBackend::open_biased(const ConnectionOptions &options) {
-  return std::make_unique<NetftSession>(client_config(options, netft::StartupMode::BiasAndStream));
+  auto config = client_config(options, netft::StartupMode::BiasAndStream);
+  config.recovery_policy = netft::RecoveryPolicy::FailStop;
+  return std::make_unique<NetftSession>(std::move(config));
 }
 
 } // namespace netft_cli

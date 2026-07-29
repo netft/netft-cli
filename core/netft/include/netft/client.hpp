@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -29,13 +30,12 @@ public:
 
   void start(SampleCallback callback);
   void stop() noexcept;
-  // Stops delivery while retaining the bound UDP socket until destruction.
-  void stop_and_hold_port() noexcept;
   bool wait_for_first_sample(std::chrono::duration<double> timeout);
   [[nodiscard]] bool faulted() const noexcept;
   [[nodiscard]] FaultCode fault_code() const noexcept;
   [[nodiscard]] HealthSnapshot health() const;
   [[nodiscard]] std::optional<Sample> latest_sample() const;
+  [[nodiscard]] std::uint16_t local_port() const;
 
 private:
   class Impl;

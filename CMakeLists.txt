@@ -180,6 +180,15 @@ if(BUILD_TESTING)
   netft_enable_sanitizers(netft_bias_test)
   add_test(NAME netft_bias COMMAND netft_bias_test)
 
+  if(NOT WIN32)
+    add_executable(netft_udp_port_isolation_test test/unit/udp_port_isolation_test.cpp)
+    target_include_directories(netft_udp_port_isolation_test PRIVATE core/netft/src)
+    target_link_libraries(netft_udp_port_isolation_test PRIVATE netft_core GTest::gtest_main)
+    netft_enable_warnings(netft_udp_port_isolation_test)
+    netft_enable_sanitizers(netft_udp_port_isolation_test)
+    add_test(NAME netft_udp_port_isolation COMMAND netft_udp_port_isolation_test)
+  endif()
+
   add_test(
     NAME sync_core
     COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test/tools/test_sync_core.py" -q

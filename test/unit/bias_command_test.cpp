@@ -265,7 +265,7 @@ TEST(BiasCommand, PreviewSessionHoldsPortAndStaysAliveThroughFreshFirstSample) {
   EXPECT_EQ(run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt),
             0);
 
-  EXPECT_EQ(backend.session().stop_and_hold_port_calls(), 1U);
+  EXPECT_GE(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(backend.preview_alive_at_biased_connect());
   EXPECT_TRUE(backend.preview_alive_at_biased_first_sample());
 }

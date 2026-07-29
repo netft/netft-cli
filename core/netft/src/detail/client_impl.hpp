@@ -24,12 +24,12 @@ public:
 
   void start(SampleCallback callback);
   void stop() noexcept;
-  void stop_and_hold_port() noexcept;
   bool wait_for_first_sample(std::chrono::duration<double> timeout);
   bool faulted() const noexcept;
   FaultCode fault_code() const noexcept;
   HealthSnapshot health() const;
   std::optional<Sample> latest_sample() const;
+  std::uint16_t local_port() const;
 
 private:
   enum class SessionResult {
@@ -59,7 +59,6 @@ private:
   void apply_configuration(SensorConfiguration configuration);
   std::optional<SessionResult> handle_record(const detail::RawRecord &record,
                                              std::chrono::steady_clock::time_point received_at);
-  void stop_impl(bool hold_port) noexcept;
   void close_session() noexcept;
   void set_fault(FaultCode code, std::string message) noexcept;
   void record_callback_error(const char *message) noexcept;
@@ -91,7 +90,6 @@ private:
   detail::RdtSequenceTracker rdt_sequence_;
   detail::FtSequenceTracker ft_sequence_;
   std::atomic<bool> stopping_{false};
-  std::atomic<bool> hold_port_{false};
   std::atomic<bool> worker_exited_{true};
   bool session_started_{false};
   detail::FaultLatch fault_latch_;

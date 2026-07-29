@@ -230,14 +230,7 @@ std::thread Client::Impl::create_worker_thread() {
   return std::thread([this] { run(); });
 }
 
-void Client::Impl::stop() noexcept { stop_impl(false); }
-
-void Client::Impl::stop_and_hold_port() noexcept { stop_impl(true); }
-
-void Client::Impl::stop_impl(const bool hold_port) noexcept {
-  if (hold_port) {
-    hold_port_.store(true, std::memory_order_release);
-  }
+void Client::Impl::stop() noexcept {
   for (;;) {
     std::thread joining_worker;
     {
@@ -340,6 +333,8 @@ std::optional<Sample> Client::Impl::latest_sample() const {
   std::scoped_lock data_lock(data_mutex_);
   return latest_;
 }
+
+std::uint16_t Client::Impl::local_port() const { return transport_.local_port(); }
 
 SensorConfiguration Client::Impl::configuration_for_session() {
   if (config_.calibration_override) {
@@ -703,7 +698,7 @@ void Client::Impl::close_session() noexcept {
     }
     session_started_ = false;
   }
-  if (!hold_port_.load(std::memory_order_acquire)) {
+  if (!config_.retain_bound_socket_until_destruction) {
     transport_.close();
   }
 }

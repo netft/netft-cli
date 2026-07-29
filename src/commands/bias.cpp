@@ -41,7 +41,7 @@ netft::SensorConfiguration discover(const BiasOptions &options, SensorBackend &b
 
 std::unique_ptr<SensorSession> open_session(const BiasOptions &options, SensorBackend &backend) {
   try {
-    return backend.open(options.connection);
+    return backend.open_preview(options.connection);
   } catch (const std::exception &) {
     throw AppError{ExitCode::Stream, "sensor stream could not be opened"};
   }
@@ -128,6 +128,7 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
   if (!before_sample) {
     throw AppError{ExitCode::Stream, "sensor stream has no current sample"};
   }
+  session->stop();
   const auto before_health = read_health(*session);
   require_healthy(before_health);
   const BiasPreview preview{configuration,
@@ -152,7 +153,6 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
     return interrupted_status();
   }
 
-  session->stop_and_hold_port();
   auto biased_session = open_biased_session(options, backend);
   SessionStop stop_biased_session(*biased_session);
   try {

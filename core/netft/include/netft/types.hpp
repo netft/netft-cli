@@ -64,6 +64,7 @@ struct Config {
   bool deliver_samples_with_error_status{false};
   RecoveryPolicy recovery_policy{RecoveryPolicy::Reconnect};
   StartupMode startup_mode{StartupMode::Stream};
+  bool retain_bound_socket_until_destruction{false};
   std::optional<Calibration> calibration_override;
 };
 

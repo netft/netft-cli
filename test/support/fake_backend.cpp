@@ -19,7 +19,6 @@ public:
 
   void start(Callback callback) override { session_->start(std::move(callback)); }
   void stop() noexcept override { session_->stop(); }
-  void stop_and_hold_port() noexcept override { session_->stop_and_hold_port(); }
   netft::HealthSnapshot health() const override { return session_->health(); }
 
 private:
@@ -31,6 +30,7 @@ private:
 
 void FakeSession::start(Callback callback) {
   ++start_calls_;
+  stopped_ = false;
   if (fail_start_) {
     throw std::runtime_error("fake start failure");
   }
@@ -55,12 +55,10 @@ void FakeSession::start(Callback callback) {
 }
 
 void FakeSession::stop() noexcept {
-  ++stop_calls_;
-  callback_ = {};
-}
-
-void FakeSession::stop_and_hold_port() noexcept {
-  ++stop_and_hold_port_calls_;
+  if (!stopped_) {
+    ++stop_calls_;
+    stopped_ = true;
+  }
   callback_ = {};
 }
 
@@ -80,6 +78,14 @@ netft::SensorConfiguration FakeBackend::discover(const ConnectionOptions &option
 }
 
 std::unique_ptr<SensorSession> FakeBackend::open(const ConnectionOptions &options) {
+  open_options_.push_back(options);
+  if (fail_open_) {
+    throw std::runtime_error("fake open failure");
+  }
+  return std::make_unique<SharedSession>(session_);
+}
+
+std::unique_ptr<SensorSession> FakeBackend::open_preview(const ConnectionOptions &options) {
   open_options_.push_back(options);
   if (fail_open_) {
     throw std::runtime_error("fake open failure");

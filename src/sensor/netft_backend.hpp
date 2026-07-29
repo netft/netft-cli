@@ -8,6 +8,7 @@ class NetftBackend final : public SensorBackend {
 public:
   netft::SensorConfiguration discover(const ConnectionOptions &options) override;
   std::unique_ptr<SensorSession> open(const ConnectionOptions &options) override;
+  std::unique_ptr<SensorSession> open_preview(const ConnectionOptions &options) override;
   std::unique_ptr<SensorSession> open_biased(const ConnectionOptions &options) override;
 };
 

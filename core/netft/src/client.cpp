@@ -14,8 +14,6 @@ void Client::start(SampleCallback callback) { impl_->start(std::move(callback));
 
 void Client::stop() noexcept { impl_->stop(); }
 
-void Client::stop_and_hold_port() noexcept { impl_->stop_and_hold_port(); }
-
 bool Client::wait_for_first_sample(const std::chrono::duration<double> timeout) {
   return impl_->wait_for_first_sample(timeout);
 }
@@ -27,5 +25,7 @@ FaultCode Client::fault_code() const noexcept { return impl_->fault_code(); }
 HealthSnapshot Client::health() const { return impl_->health(); }
 
 std::optional<Sample> Client::latest_sample() const { return impl_->latest_sample(); }
+
+std::uint16_t Client::local_port() const { return impl_->local_port(); }
 
 } // namespace netft

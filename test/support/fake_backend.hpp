@@ -18,7 +18,6 @@ public:
   explicit FakeSession(bool biased_start = false) : biased_start_(biased_start) {}
   void start(Callback callback) override;
   void stop() noexcept override;
-  void stop_and_hold_port() noexcept override;
   netft::HealthSnapshot health() const override;
 
   void set_samples(std::vector<netft::Sample> samples) { samples_ = std::move(samples); }
@@ -32,7 +31,6 @@ public:
 
   std::size_t start_calls() const noexcept { return start_calls_; }
   std::size_t stop_calls() const noexcept { return stop_calls_; }
-  std::size_t stop_and_hold_port_calls() const noexcept { return stop_and_hold_port_calls_; }
   std::size_t held_backlog_count() const noexcept { return held_backlog_.size(); }
   std::size_t bias_send_calls() const noexcept { return bias_send_calls_; }
   std::size_t start_send_calls() const noexcept { return start_send_calls_; }
@@ -48,13 +46,13 @@ private:
   netft::HealthSnapshot health_;
   std::size_t start_calls_{};
   std::size_t stop_calls_{};
-  std::size_t stop_and_hold_port_calls_{};
   std::size_t bias_send_calls_{};
   std::size_t start_send_calls_{};
   std::size_t receive_calls_{};
   bool biased_start_{};
   bool fail_start_{};
   bool fail_start_after_bias_{};
+  bool stopped_{};
 };
 
 class FakeBackend final : public SensorBackend {
@@ -63,6 +61,7 @@ public:
 
   netft::SensorConfiguration discover(const ConnectionOptions &options) override;
   std::unique_ptr<SensorSession> open(const ConnectionOptions &options) override;
+  std::unique_ptr<SensorSession> open_preview(const ConnectionOptions &options) override;
   std::unique_ptr<SensorSession> open_biased(const ConnectionOptions &options) override;
 
   FakeSession &session() noexcept { return *session_; }

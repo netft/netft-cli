@@ -17,8 +17,6 @@ public:
   virtual void start(Callback callback) = 0;
   // Returns only after callback delivery is quiescent; no callback may begin after it returns.
   virtual void stop() noexcept = 0;
-  // Quiesces delivery but retains the bound UDP socket until this object is destroyed.
-  virtual void stop_and_hold_port() noexcept = 0;
   virtual netft::HealthSnapshot health() const = 0;
 };
 
@@ -27,6 +25,7 @@ public:
   virtual ~SensorBackend() = default;
   virtual netft::SensorConfiguration discover(const ConnectionOptions &options) = 0;
   virtual std::unique_ptr<SensorSession> open(const ConnectionOptions &options) = 0;
+  virtual std::unique_ptr<SensorSession> open_preview(const ConnectionOptions &options) = 0;
   virtual std::unique_ptr<SensorSession> open_biased(const ConnectionOptions &options) = 0;
 };
 
