@@ -1,0 +1,49 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
+        with:
+          cache: true
+      - run: |
+          pixi run cmake -S . -B build/coverage -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_CXX_FLAGS="--coverage -O0 -g" \
+            -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          pixi run cmake --build build/coverage
+          pixi run ctest --test-dir build/coverage --output-on-failure
+          pixi run gcovr \
+            --root . \
+            --filter src \
+            --filter core/netft/src \
+            --exclude test \
+            --xml-pretty \
+            --output coverage.xml \
+            build/coverage
+      - uses: codecov/codecov-action@a99c28d3f0da835de33ff2feb2e15691c7b9641f
+        with:
+          files: coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: true

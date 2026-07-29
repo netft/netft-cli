@@ -1,0 +1,39 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
+        with:
+          cache: true
+      - uses: github/codeql-action/init@adfda868f108ac4222129de456ea554034a27db7
+        with:
+          languages: c-cpp
+          build-mode: manual
+      - run: |
+          pixi run cmake -S . -B build/codeql -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_TESTING=OFF
+          pixi run cmake --build build/codeql
+      - uses: github/codeql-action/analyze@adfda868f108ac4222129de456ea554034a27db7

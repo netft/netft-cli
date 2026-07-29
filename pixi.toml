@@ -21,6 +21,7 @@ make = "*"
 
 [feature.test.dependencies]
 nlohmann_json = "*"
+pyyaml = "*"
 
 [environments]
 default = ["test"]
@@ -32,7 +33,8 @@ build = { cmd = "cmake --build build", depends-on = ["configure"] }
 test = { cmd = "ctest --test-dir build --output-on-failure", depends-on = ["build"] }
 format-check = "git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format --dry-run --Werror"
 tidy = "cmake -S . -B build/tidy -G Ninja -DBUILD_TESTING=OFF -DNETFT_CLANG_TIDY=ON && cmake --build build/tidy"
-check = { cmd = "true", depends-on = ["snapshot-check", "format-check", "test", "tidy"] }
+workflow-check = "actionlint && python -m pytest test/workflows -q"
+check = { cmd = "true", depends-on = ["snapshot-check", "format-check", "test", "tidy", "workflow-check"] }
 hardware-test = { cmd = "NETFT_ALLOW_BIAS=0 python test/hardware/hardware_test.py", depends-on = ["build"] }
 hardware-bias-test = { cmd = "NETFT_ALLOW_BIAS=1 python test/hardware/hardware_test.py", depends-on = ["build"] }
 sanitizers = "cmake -S . -B build/sanitizers -G Ninja -DBUILD_TESTING=ON -DNETFT_SANITIZERS=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build build/sanitizers && ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitizers --output-on-failure"

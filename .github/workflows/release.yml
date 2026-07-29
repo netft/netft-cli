@@ -1,0 +1,379 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release tags must use vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          test "${version}" = "0.1.0"
+
+          test "$(git cat-file -t "${GITHUB_REF_NAME}")" = tag
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor \
+            "${GITHUB_REF_NAME}^{commit}" \
+            refs/remotes/origin/main
+
+          signature_output="$(
+            git \
+              -c gpg.format=ssh \
+              -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers \
+              verify-tag --raw "${GITHUB_REF_NAME}" 2>&1
+          )"
+          printf '%s\n' "${signature_output}"
+          grep -Fq \
+            'Good "git" signature for 42986190+han-xudong@users.noreply.github.com with ' \
+            <<<"${signature_output}"
+
+          cmake_version="$(
+            sed -nE \
+              's/^project\(netft_cli VERSION ([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p' \
+              CMakeLists.txt
+          )"
+          test "${cmake_version}" = "${version}"
+          python3 tools/release_notes.py \
+            --changelog CHANGELOG.md \
+            --version "${version}" \
+            --output "${RUNNER_TEMP}/release-notes.md"
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
+        with:
+          cache: true
+      - run: pixi run check
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+            extension: .tar.gz
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            extension: .tar.gz
+          - target: macos-x86_64
+            runner: macos-15-intel
+            extension: .tar.gz
+          - target: macos-arm64
+            runner: macos-15
+            extension: .tar.gz
+          - target: windows-x86_64
+            runner: windows-2025
+            extension: .zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - if: matrix.target != 'windows-x86_64'
+        shell: bash
+        env:
+          NETFT_CLI_CURL_PREFIX: ${{ runner.temp }}/netft-curl
+          NETFT_CLI_BUILD_JOBS: "2"
+        run: |
+          set -euo pipefail
+          bash tools/build_static_curl.sh
+          cmake -S . -B build/release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DCURL_USE_STATIC_LIBS=ON \
+            -DCURL_ROOT="${NETFT_CLI_CURL_PREFIX}"
+          cmake --build build/release
+          ./build/release/netft --version
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+            python3 tools/package_release.py \
+              --binary build/release/netft \
+              --version "${{ needs.validate.outputs.version }}" \
+              --target "${{ matrix.target }}" \
+              --output dist
+          python3 tools/check_release.py \
+            dist \
+            --version "${{ needs.validate.outputs.version }}" \
+            --allow-partial
+
+      - if: matrix.target == 'windows-x86_64'
+        shell: pwsh
+        env:
+          NETFT_CLI_CURL_PREFIX: ${{ runner.temp }}\netft-curl
+          NETFT_CLI_BUILD_JOBS: "2"
+        run: |
+          tools/build_windows_curl.ps1
+          cmake -S . -B build/release `
+            -DBUILD_TESTING=OFF `
+            -DCURL_USE_STATIC_LIBS=ON `
+            "-DCURL_ROOT=$env:NETFT_CLI_CURL_PREFIX"
+          cmake --build build/release --config Release
+          & build/release/Release/netft.exe --version
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $env:SOURCE_DATE_EPOCH = git show -s --format=%ct HEAD
+          python tools/package_release.py `
+            --binary build/release/Release/netft.exe `
+            --version "${{ needs.validate.outputs.version }}" `
+            --target "${{ matrix.target }}" `
+            --output dist
+          python tools/check_release.py `
+            dist `
+            --version "${{ needs.validate.outputs.version }}" `
+            --allow-partial
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/netft-cli-${{ needs.validate.outputs.version }}-${{ matrix.target }}${{ matrix.extension }}
+          if-no-files-found: error
+
+  assemble:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-*
+          path: release/dist
+          merge-multiple: true
+      - run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          directory = Path("release/dist")
+          archives = sorted(directory.glob("netft-cli-*"))
+          lines = [
+              f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+              for path in archives
+          ]
+          (directory / "SHA256SUMS").write_text(
+              "".join(lines), encoding="utf-8", newline="\n"
+          )
+          PY
+          python3 -c \
+            'from pathlib import Path; from tools.check_release import validate_inventory; validate_inventory(Path("release/dist"), "'"${version}"'")'
+          python3 tools/release_notes.py \
+            --changelog CHANGELOG.md \
+            --version "${version}" \
+            --output release/RELEASE_NOTES.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-bundle
+          path: release
+          if-no-files-found: error
+
+  attest:
+    needs: assemble
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-bundle
+          path: release
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: release/dist/netft-cli-*
+
+  draft_release:
+    needs: [assemble, attest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-bundle
+          path: release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if state="$(
+            gh release view "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json isDraft \
+              --jq .isDraft 2>/dev/null
+          )"; then
+            test "${state}" = true
+            gh release edit "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft \
+              --notes-file release/RELEASE_NOTES.md
+            gh release upload "${GITHUB_REF_NAME}" \
+              release/dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              release/dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --draft \
+              --notes-file release/RELEASE_NOTES.md
+          fi
+
+  smoke:
+    needs: draft_release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: macos-x86_64
+            runner: macos-15-intel
+          - target: macos-arm64
+            runner: macos-15
+          - target: windows-x86_64
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - if: matrix.target != 'windows-x86_64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          asset_directory="${RUNNER_TEMP}/release-root/releases/download/${GITHUB_REF_NAME}"
+          install_directory="${RUNNER_TEMP}/netft-install"
+          mkdir -p "${asset_directory}" "${install_directory}"
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'netft-cli-*' \
+            --pattern SHA256SUMS \
+            --dir "${asset_directory}"
+          NETFT_RELEASE_DIR="${asset_directory}" VERSION="${version}" \
+            python3 -c \
+              'import os; from pathlib import Path; from tools.check_release import validate_inventory; validate_inventory(Path(os.environ["NETFT_RELEASE_DIR"]), os.environ["VERSION"])'
+          python3 -m http.server 49152 \
+            --bind 127.0.0.1 \
+            --directory "${RUNNER_TEMP}/release-root" \
+            >"${RUNNER_TEMP}/release-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 50); do
+            if curl --fail --silent \
+              "http://127.0.0.1:49152/releases/download/${GITHUB_REF_NAME}/SHA256SUMS" \
+              >/dev/null; then
+              break
+            fi
+            if [[ "${attempt}" = 50 ]]; then
+              exit 1
+            fi
+            sleep 0.1
+          done
+          NETFT_CLI_RELEASE_BASE_URL=http://127.0.0.1:49152/releases \
+            sh scripts/install/install.sh \
+              --version "${version}" \
+              --bin-dir "${install_directory}"
+          "${install_directory}/netft" --version
+
+      - if: matrix.target == 'windows-x86_64'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $Version = $env:GITHUB_REF_NAME.Substring(1)
+          $Root = Join-Path $env:RUNNER_TEMP "release-root"
+          $Assets = Join-Path $Root "releases\download\$env:GITHUB_REF_NAME"
+          $Install = Join-Path $env:RUNNER_TEMP "netft-install"
+          New-Item -ItemType Directory -Force -Path $Assets, $Install | Out-Null
+          gh release download $env:GITHUB_REF_NAME `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern "netft-cli-*" `
+            --pattern "SHA256SUMS" `
+            --dir $Assets
+          $env:NETFT_RELEASE_DIR = $Assets
+          $env:VERSION = $Version
+          python -c @'
+          import os
+          from pathlib import Path
+          from tools.check_release import validate_inventory
+          validate_inventory(Path(os.environ["NETFT_RELEASE_DIR"]), os.environ["VERSION"])
+          '@
+          $Server = Start-Process python `
+            -ArgumentList "-m", "http.server", "49152", "--bind", "127.0.0.1", "--directory", $Root `
+            -PassThru
+          try {
+            $Ready = $false
+            for ($Attempt = 0; $Attempt -lt 50; $Attempt++) {
+              try {
+                $Client = [Net.Sockets.TcpClient]::new("127.0.0.1", 49152)
+                $Client.Dispose()
+                $Ready = $true
+                break
+              } catch {
+                Start-Sleep -Milliseconds 100
+              }
+            }
+            if (-not $Ready) {
+              throw "release fixture server did not start"
+            }
+            $env:NETFT_CLI_RELEASE_BASE_URL = "http://127.0.0.1:49152/releases"
+            scripts/install/install.ps1 -Version $Version -BinDir $Install -NoModifyPath
+            & (Join-Path $Install "netft.exe") --version
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          } finally {
+            Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue
+          }
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false
