@@ -14,7 +14,7 @@ void Client::start(SampleCallback callback) { impl_->start(std::move(callback));
 
 void Client::stop() noexcept { impl_->stop(); }
 
-void Client::bias() { impl_->bias(); }
+std::uint64_t Client::bias() { return impl_->bias(); }
 
 bool Client::wait_for_first_sample(const std::chrono::duration<double> timeout) {
   return impl_->wait_for_first_sample(timeout);

@@ -24,7 +24,7 @@ public:
 
   void start(SampleCallback callback);
   void stop() noexcept;
-  void bias();
+  std::uint64_t bias();
   bool wait_for_first_sample(std::chrono::duration<double> timeout);
   bool faulted() const noexcept;
   FaultCode fault_code() const noexcept;
@@ -58,7 +58,8 @@ private:
   SensorConfiguration configuration_for_session();
   void apply_configuration(SensorConfiguration configuration);
   std::optional<SessionResult> handle_record(const detail::RawRecord &record,
-                                             std::chrono::steady_clock::time_point received_at);
+                                             std::chrono::steady_clock::time_point received_at,
+                                             std::uint64_t acquisition_epoch);
   void close_session() noexcept;
   void set_fault(FaultCode code, std::string message) noexcept;
   void record_callback_error(const char *message) noexcept;
@@ -89,6 +90,7 @@ private:
   detail::UdpTransport transport_;
   detail::RdtSequenceTracker rdt_sequence_;
   detail::FtSequenceTracker ft_sequence_;
+  std::atomic<std::uint64_t> acquisition_epoch_{};
   std::atomic<bool> stopping_{false};
   std::atomic<bool> worker_exited_{true};
   bool session_started_{false};

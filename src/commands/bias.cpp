@@ -98,7 +98,7 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
   LatestSampleSlot after_slot;
   std::atomic<BiasPhase> phase{BiasPhase::Before};
   std::atomic<std::uint32_t> preview_sequence{};
-  std::chrono::steady_clock::time_point completion_boundary{};
+  SensorSession::AcquisitionEpoch completion_epoch{};
   auto session = open_session(options, backend);
   SessionStop stop_session(*session);
   const auto origin = std::chrono::steady_clock::now();
@@ -108,7 +108,7 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
       const auto current_phase = phase.load(std::memory_order_acquire);
       if (current_phase == BiasPhase::After &&
           sample.rdt_sequence != preview_sequence.load(std::memory_order_acquire) &&
-          sample.received_at >= completion_boundary) {
+          sample.acquisition_epoch == completion_epoch) {
         after_slot.publish(sample);
       } else if (current_phase == BiasPhase::Before) {
         before_slot.publish(sample);
@@ -160,10 +160,10 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
   preview_sequence.store(before_sample->rdt_sequence, std::memory_order_release);
   phase.store(BiasPhase::Sending, std::memory_order_release);
   try {
-    session->bias([&](SensorSession::TimePoint boundary) {
-      // The release-store publishes the typed boundary before the callback gate opens. A sample
-      // reads the boundary only after an acquire-load observes After.
-      completion_boundary = boundary;
+    session->bias([&](const SensorSession::AcquisitionEpoch epoch) {
+      // The release-store publishes the causal receive epoch before the callback gate opens. A
+      // sample reads the epoch only after an acquire-load observes After.
+      completion_epoch = epoch;
       phase.store(BiasPhase::After, std::memory_order_release);
     });
   } catch (const std::exception &) {

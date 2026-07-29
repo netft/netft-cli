@@ -72,6 +72,8 @@ struct Sample {
   ForceUnit force_unit{ForceUnit::Unknown};
   TorqueUnit torque_unit{TorqueUnit::Unknown};
   std::uint64_t configuration_revision{};
+  // Epoch captured immediately before the receive attempt that produced this sample.
+  std::uint64_t acquisition_epoch{};
   std::chrono::steady_clock::time_point received_at;
 };
 

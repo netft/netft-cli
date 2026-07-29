@@ -1,0 +1,57 @@
+diff --git a/include/netft/client.hpp b/include/netft/client.hpp
+index 4a24373..cbb5d97 100644
+--- a/include/netft/client.hpp
++++ b/include/netft/client.hpp
+@@ -32 +32,2 @@ public:
+-  void bias();
++  // Returns the new acquisition epoch after both bias commands have been sent successfully.
++  std::uint64_t bias();
+diff --git a/include/netft/types.hpp b/include/netft/types.hpp
+index feb6365..b8e707f 100644
+--- a/include/netft/types.hpp
++++ b/include/netft/types.hpp
+@@ -74,0 +75,2 @@ struct Sample {
++  // Epoch captured immediately before the receive attempt that produced this sample.
++  std::uint64_t acquisition_epoch{};
+diff --git a/src/client.cpp b/src/client.cpp
+index e253b28..9dfefca 100644
+--- a/src/client.cpp
++++ b/src/client.cpp
+@@ -17 +17 @@ void Client::stop() noexcept { impl_->stop(); }
+-void Client::bias() { impl_->bias(); }
++std::uint64_t Client::bias() { return impl_->bias(); }
+diff --git a/src/detail/client_impl.cpp b/src/detail/client_impl.cpp
+index 1314d43..f175690 100644
+--- a/src/detail/client_impl.cpp
++++ b/src/detail/client_impl.cpp
+@@ -289 +289 @@ void Client::Impl::stop() noexcept {
+-void Client::Impl::bias() {
++std::uint64_t Client::Impl::bias() {
+@@ -300,0 +301 @@ void Client::Impl::bias() {
++  return acquisition_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
+@@ -477,0 +479,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
++    // Capture before entering the blocking receive. A receive that spans a successful bias
++    // therefore remains attributable to the old epoch even if decode and callback happen later.
++    const auto acquisition_epoch = acquisition_epoch_.load(std::memory_order_acquire);
+@@ -515 +519 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
+-    if (const auto outcome = handle_record(record, received_at)) {
++    if (const auto outcome = handle_record(record, received_at, acquisition_epoch)) {
+@@ -524 +528,2 @@ Client::Impl::handle_record(const detail::RawRecord &record,
+-                            const std::chrono::steady_clock::time_point received_at) {
++                            const std::chrono::steady_clock::time_point received_at,
++                            const std::uint64_t acquisition_epoch) {
+@@ -636,0 +642 @@ Client::Impl::handle_record(const detail::RawRecord &record,
++  sample.acquisition_epoch = acquisition_epoch;
+diff --git a/src/detail/client_impl.hpp b/src/detail/client_impl.hpp
+index 512ea21..ba88b32 100644
+--- a/src/detail/client_impl.hpp
++++ b/src/detail/client_impl.hpp
+@@ -27 +27 @@ public:
+-  void bias();
++  std::uint64_t bias();
+@@ -61 +61,2 @@ private:
+-                                             std::chrono::steady_clock::time_point received_at);
++                                             std::chrono::steady_clock::time_point received_at,
++                                             std::uint64_t acquisition_epoch);
+@@ -91,0 +93 @@ private:
++  std::atomic<std::uint64_t> acquisition_epoch_{};

@@ -44,8 +44,7 @@ public:
   void stop() noexcept override { client_.stop(); }
   void bias(BiasCompletion on_command_complete) override {
     std::scoped_lock lock(callback_gate_);
-    client_.bias();
-    on_command_complete(std::chrono::steady_clock::now());
+    on_command_complete(client_.bias());
   }
   netft::HealthSnapshot health() const override { return client_.health(); }
 

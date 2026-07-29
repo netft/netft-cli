@@ -44,18 +44,37 @@ def make_tagged_fixture(path: Path, tag: str = "v0.3.0") -> Path:
     return path
 
 
+def make_exact_base_fixture(path: Path) -> Path:
+    repository = Path(__file__).parents[2]
+    shutil.copytree(repository / "core" / "netft", path)
+    run("git", "init", cwd=path)
+    run(
+        "git",
+        "apply",
+        "--reverse",
+        "--unidiff-zero",
+        str(repository / "core" / "ADAPTATIONS.patch"),
+        cwd=path,
+    )
+    run("git", "config", "user.name", "Test User", cwd=path)
+    run("git", "config", "user.email", "test@example.com", cwd=path)
+    run("git", "add", ".", cwd=path)
+    run("git", "commit", "-m", "exact upstream fixture", cwd=path)
+    run("git", "tag", "v0.3.0", cwd=path)
+    run("git", "remote", "add", "origin", sync_core.REQUIRED_REPOSITORY, cwd=path)
+    return path
+
+
 def synchronized_fixture(path: Path) -> Path:
     destination = path / "core"
-    shutil.copytree(Path(__file__).parents[2] / "core" / "netft", destination / "netft")
-    sync_core.write_upstream(destination / "UPSTREAM")
-    sync_core.write_manifest(destination / "netft", destination / "MANIFEST.sha256")
+    shutil.copytree(Path(__file__).parents[2] / "core", destination)
     return destination
 
 
-def test_sync_records_exact_release_and_selected_paths(
+def test_sync_records_exact_release_plus_explicit_adaptation_and_selected_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = make_tagged_fixture(tmp_path / "source", tag="v0.3.0")
+    source = make_exact_base_fixture(tmp_path / "source")
     destination = tmp_path / "core"
     monkeypatch.setattr(
         sync_core, "REQUIRED_COMMIT", run("git", "rev-parse", "HEAD", cwd=source), raising=False
@@ -68,8 +87,34 @@ def test_sync_records_exact_release_and_selected_paths(
     assert metadata["paths"] == "LICENSE,include,src"
     assert metadata["commit"] == run("git", "rev-parse", "HEAD", cwd=source)
     assert metadata["repository"] == "https://github.com/netft/netft-cpp.git"
+    assert metadata["adaptation_path"] == "ADAPTATIONS.patch"
+    assert metadata["adaptation_format"] == "git-diff-unified-zero"
+    assert metadata["adaptation_sha256"] == sync_core.digest(destination / "ADAPTATIONS.patch")
     assert not (destination / "netft" / "app").exists()
     sync_core.verify(destination)
+
+
+def test_sync_replays_adaptation_from_exact_base_to_current_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = Path(__file__).parents[2]
+    source = make_exact_base_fixture(tmp_path / "source")
+    monkeypatch.setattr(
+        sync_core, "REQUIRED_COMMIT", run("git", "rev-parse", "HEAD", cwd=source)
+    )
+
+    destination = tmp_path / "core"
+    sync_core.sync(source, destination, "v0.3.0")
+
+    expected = {
+        path.relative_to(repository / "core" / "netft"): sync_core.digest(path)
+        for path in sync_core.snapshot_files(repository / "core" / "netft")
+    }
+    actual = {
+        path.relative_to(destination / "netft"): sync_core.digest(path)
+        for path in sync_core.snapshot_files(destination / "netft")
+    }
+    assert actual == expected
 
 
 def test_sync_rejects_dirty_source_tree(
@@ -125,6 +170,15 @@ def test_verify_rejects_changed_snapshot_file(tmp_path: Path) -> None:
         sync_core.verify(destination)
 
 
+def test_verify_rejects_changed_adaptation_patch(tmp_path: Path) -> None:
+    destination = synchronized_fixture(tmp_path)
+    patch = destination / "ADAPTATIONS.patch"
+    patch.write_text(patch.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="adaptation checksum mismatch"):
+        sync_core.verify(destination)
+
+
 @pytest.mark.parametrize(
     ("field", "replacement"),
     [
@@ -132,6 +186,9 @@ def test_verify_rejects_changed_snapshot_file(tmp_path: Path) -> None:
         ("tag", "v0.3.1"),
         ("commit", "0" * 40),
         ("paths", "LICENSE,include,app"),
+        ("adaptation_path", "LOCAL.patch"),
+        ("adaptation_format", "unified-diff"),
+        ("adaptation_sha256", "0" * 64),
     ],
 )
 def test_verify_rejects_tampered_upstream_metadata(

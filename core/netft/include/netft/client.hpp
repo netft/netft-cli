@@ -29,7 +29,8 @@ public:
 
   void start(SampleCallback callback);
   void stop() noexcept;
-  void bias();
+  // Returns the new acquisition epoch after both bias commands have been sent successfully.
+  std::uint64_t bias();
   bool wait_for_first_sample(std::chrono::duration<double> timeout);
   [[nodiscard]] bool faulted() const noexcept;
   [[nodiscard]] FaultCode fault_code() const noexcept;

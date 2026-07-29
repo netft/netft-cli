@@ -44,11 +44,12 @@ void FakeSession::bias(BiasCompletion on_command_complete) {
   for (const auto &sample : during_bias_samples_) {
     callback_(sample);
   }
-  on_command_complete(bias_completion_boundary_);
+  on_command_complete(bias_completion_epoch_);
   for (const auto &sample : completion_boundary_samples_) {
     callback_(sample);
   }
-  for (const auto &sample : post_bias_samples_) {
+  for (auto sample : post_bias_samples_) {
+    sample.acquisition_epoch = bias_completion_epoch_;
     callback_(sample);
   }
 }

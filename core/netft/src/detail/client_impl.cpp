@@ -286,7 +286,7 @@ void Client::Impl::stop() noexcept {
   }
 }
 
-void Client::Impl::bias() {
+std::uint64_t Client::Impl::bias() {
   std::scoped_lock command_lock(command_mutex_);
   std::scoped_lock record_lock(record_mutex_);
   {
@@ -298,6 +298,7 @@ void Client::Impl::bias() {
   transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
   transport_.send(detail::encode_request(detail::Command::StartRealtime));
   rdt_sequence_.reset();
+  return acquisition_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
 }
 
 bool Client::Impl::wait_for_first_sample(const std::chrono::duration<double> timeout) {
@@ -475,6 +476,9 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     }
 
     std::size_t size{};
+    // Capture before entering the blocking receive. A receive that spans a successful bias
+    // therefore remains attributable to the old epoch even if decode and callback happen later.
+    const auto acquisition_epoch = acquisition_epoch_.load(std::memory_order_acquire);
     try {
       size = transport_.receive(buffer.data(), buffer.size(), deadline - now);
     } catch (const std::exception &error) {
@@ -512,7 +516,7 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     }
     received_valid_record = true;
     deadline = received_at + timeout;
-    if (const auto outcome = handle_record(record, received_at)) {
+    if (const auto outcome = handle_record(record, received_at, acquisition_epoch)) {
       return {*outcome, {}, received_valid_record};
     }
   }
@@ -521,7 +525,8 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
 
 std::optional<Client::Impl::SessionResult>
 Client::Impl::handle_record(const detail::RawRecord &record,
-                            const std::chrono::steady_clock::time_point received_at) {
+                            const std::chrono::steady_clock::time_point received_at,
+                            const std::uint64_t acquisition_epoch) {
   SensorConfiguration configuration;
   bool deliver = true;
   std::optional<SessionResult> outcome;
@@ -634,6 +639,7 @@ Client::Impl::handle_record(const detail::RawRecord &record,
   sample.force_unit = calibration.force_unit;
   sample.torque_unit = calibration.torque_unit;
   sample.configuration_revision = configuration.revision;
+  sample.acquisition_epoch = acquisition_epoch;
   sample.received_at = received_at;
 
   const auto callback_failure_outcome = [&] {

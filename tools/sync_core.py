@@ -13,6 +13,13 @@ REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
 REQUIRED_TAG = "v0.3.0"
 REQUIRED_COMMIT = "46ee05639f818a17c1cfe604d0d77b1feb8f9b2b"
 SELECTED = ("LICENSE", "include", "src")
+ADAPTATION_NAME = "ADAPTATIONS.patch"
+ADAPTATION_FORMAT = "git-diff-unified-zero"
+REQUIRED_ADAPTATION_SHA256 = "565b1e600803c6ea7cbf0094c9c1d5dd5ded1ce933ea0258fe79701218e27aa8"
+
+
+def canonical_adaptation() -> Path:
+    return Path(__file__).resolve().parents[1] / "core" / ADAPTATION_NAME
 
 
 def required_metadata() -> dict[str, str]:
@@ -21,6 +28,9 @@ def required_metadata() -> dict[str, str]:
         "tag": REQUIRED_TAG,
         "commit": REQUIRED_COMMIT,
         "paths": ",".join(SELECTED),
+        "adaptation_path": ADAPTATION_NAME,
+        "adaptation_format": ADAPTATION_FORMAT,
+        "adaptation_sha256": REQUIRED_ADAPTATION_SHA256,
     }
 
 
@@ -77,7 +87,15 @@ def read_upstream(path: Path) -> dict[str, str]:
             raise SystemExit("invalid upstream metadata")
         metadata[key] = value
 
-    required = {"repository", "tag", "commit", "paths"}
+    required = {
+        "repository",
+        "tag",
+        "commit",
+        "paths",
+        "adaptation_path",
+        "adaptation_format",
+        "adaptation_sha256",
+    }
     if set(metadata) != required:
         raise SystemExit("invalid upstream metadata")
     return metadata
@@ -93,6 +111,21 @@ def digest(path: Path) -> str:
 
 def snapshot_files(root: Path) -> list[Path]:
     return sorted((path for path in root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
+
+
+def apply_adaptation(destination: Path, patch: Path) -> None:
+    """Apply the declared git-diff adaptation to the exact copied snapshot."""
+    try:
+        subprocess.run(
+            ["git", "apply", "--unidiff-zero", "--directory=netft", str(patch.resolve())],
+            cwd=destination,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        message = error.stderr.strip() or error.stdout.strip() or "adaptation patch failed"
+        raise SystemExit(message) from error
 
 
 def write_manifest(root: Path, manifest: Path) -> None:
@@ -120,9 +153,12 @@ def read_manifest(path: Path) -> dict[str, str]:
 
 
 def verify(destination: Path = Path("core")) -> None:
-    """Exit successfully only when the copied tree exactly matches its manifest."""
+    """Verify upstream provenance, the declared adaptation, and the adapted-tree manifest."""
     if read_upstream(destination / "UPSTREAM") != required_metadata():
         raise SystemExit("invalid upstream provenance")
+    adaptation = destination / ADAPTATION_NAME
+    if not adaptation.is_file() or digest(adaptation) != REQUIRED_ADAPTATION_SHA256:
+        raise SystemExit("adaptation checksum mismatch")
     root = destination / "netft"
     expected = read_manifest(destination / "MANIFEST.sha256")
     actual = {
@@ -134,7 +170,7 @@ def verify(destination: Path = Path("core")) -> None:
 
 
 def sync(source: Path, destination: Path, tag: str) -> None:
-    """Copy the exact tagged upstream core and record its provenance."""
+    """Copy the exact tagged upstream core, apply the declared adaptation, and record provenance."""
     source = source.resolve()
     destination = destination.resolve()
     if tag != REQUIRED_TAG:
@@ -148,7 +184,15 @@ def sync(source: Path, destination: Path, tag: str) -> None:
         raise SystemExit("source HEAD does not match the requested tag")
     if git(source, "status", "--porcelain"):
         raise SystemExit("source repository is dirty")
+    adaptation = canonical_adaptation()
+    if not adaptation.is_file() or digest(adaptation) != REQUIRED_ADAPTATION_SHA256:
+        raise SystemExit("canonical adaptation checksum mismatch")
     replace_selected_tree(source, destination / "netft", SELECTED)
+    destination.mkdir(parents=True, exist_ok=True)
+    copied_adaptation = destination / ADAPTATION_NAME
+    if adaptation.resolve() != copied_adaptation.resolve():
+        shutil.copy2(adaptation, copied_adaptation)
+    apply_adaptation(destination, copied_adaptation)
     write_upstream(destination / "UPSTREAM")
     write_manifest(destination / "netft", destination / "MANIFEST.sha256")
     verify(destination)
