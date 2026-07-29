@@ -18,6 +18,12 @@ clang-tools = "*"
 actionlint = "*"
 gcovr = "*"
 
+[feature.test.dependencies]
+nlohmann_json = "*"
+
+[environments]
+default = ["test"]
+
 [tasks]
 snapshot-check = "python tools/sync_core.py verify"
 configure = "cmake -S . -B build -G Ninja -DBUILD_TESTING=ON"
