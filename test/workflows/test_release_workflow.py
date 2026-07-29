@@ -413,6 +413,22 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
     ) in commands(jobs["publish"])
 
 
+def test_only_final_release_publication_uses_protected_environment() -> None:
+    workflow = load_yaml(WORKFLOW_DIRECTORY / "release.yml")
+    jobs = workflow["jobs"]
+    protected_jobs: dict[str, str] = {}
+
+    for name, job in jobs.items():
+        environment = job.get("environment")
+        if isinstance(environment, dict):
+            environment = environment.get("name")
+        if environment is not None:
+            protected_jobs[name] = environment
+
+    assert protected_jobs == {"publish": "netft-release"}
+    assert jobs["publish"]["needs"] == ["smoke", "draft_release"]
+
+
 def test_remote_release_inventory_requires_exact_draft_assets() -> None:
     release_inventory = load_release_inventory_module()
     names = sorted(release_inventory.expected_asset_names("0.1.0"))

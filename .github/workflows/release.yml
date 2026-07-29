@@ -447,6 +447,7 @@ jobs:
   publish:
     needs: [smoke, draft_release]
     runs-on: ubuntu-24.04
+    environment: netft-release
     permissions:
       contents: write
     steps:
