@@ -13,7 +13,11 @@ namespace {
 constexpr std::size_t label_width = 10;
 constexpr std::size_t numeric_width = 14;
 constexpr std::size_t frame_width = label_width + (6 * numeric_width);
-constexpr std::size_t frame_height = 8;
+constexpr std::size_t frame_height = 10;
+constexpr std::size_t host_width = 72;
+constexpr std::size_t state_width = 48;
+constexpr std::size_t rate_width = 14;
+constexpr std::size_t elapsed_width = 20;
 
 std::string sanitize_human_text(std::string_view text) {
   std::string sanitized;
@@ -32,6 +36,15 @@ std::string fixed_field(std::string_view value, std::size_t width) {
     return overflow;
   }
   return std::string(width - sanitized.size(), ' ') + sanitized;
+}
+
+std::string bounded_text(std::string_view value, std::size_t width) {
+  const auto sanitized = sanitize_human_text(value);
+  if (sanitized.size() > width) {
+    std::string overflow(width, '#');
+    return overflow;
+  }
+  return sanitized + std::string(width - sanitized.size(), ' ');
 }
 
 std::string fixed_integer(std::int32_t value) {
@@ -58,10 +71,11 @@ std::string pad_frame_rows(std::string_view frame) {
     const auto end = frame.find('\n', start);
     const auto row =
         frame.substr(start, end == std::string_view::npos ? frame.size() - start : end - start);
-    padded.append(row.substr(0, frame_width));
-    if (row.size() < frame_width) {
-      padded.append(frame_width - row.size(), ' ');
+    if (row.size() > frame_width) {
+      throw std::logic_error("terminal frame row exceeds fixed width");
     }
+    padded.append(row);
+    padded.append(frame_width - row.size(), ' ');
     padded.push_back('\n');
     if (end == std::string_view::npos) {
       break;
@@ -83,13 +97,14 @@ void append_measurement_row(std::ostringstream &stream, std::string_view label,
 
 std::string render_frame(const SampleRecord &record) {
   std::ostringstream stream;
-  stream << "NetFT monitor  host=" << sanitize_human_text(record.host)
-         << "  state=" << sanitize_human_text(record.state)
-         << "  rate_hz=" << decimal(record.receive_rate_hz, 2) << '\n';
+  stream << "NetFT monitor  host=" << bounded_text(record.host, host_width) << '\n';
+  stream << "Connection   state=" << bounded_text(record.state, state_width)
+         << "  rate_hz=" << fixed_field(decimal(record.receive_rate_hz, 2), rate_width) << '\n';
   stream << "Sequences  rdt=" << record.rdt_sequence << "  ft=" << record.ft_sequence
          << "  status=" << record.status << '\n';
   stream << "Health     lost=" << record.lost_count << "  duplicate=" << record.duplicate_count
-         << "  out_of_order=" << record.out_of_order_count << '\n';
+         << '\n';
+  stream << "Ordering   out_of_order=" << record.out_of_order_count << '\n';
 
   const std::array<std::string_view, 6> axes{"Fx", "Fy", "Fz", "Tx", "Ty", "Tz"};
   stream << std::left << std::setw(static_cast<int>(label_width)) << "Axis" << std::right;
@@ -111,7 +126,8 @@ std::string render_frame(const SampleRecord &record) {
     stream << fixed_field(unit, numeric_width);
   }
   stream << '\n';
-  stream << "Elapsed    " << decimal(record.elapsed_seconds, 5) << " s\n";
+  stream << "Elapsed    " << fixed_field(decimal(record.elapsed_seconds, 5), elapsed_width)
+         << " s\n";
   return pad_frame_rows(stream.str());
 }
 

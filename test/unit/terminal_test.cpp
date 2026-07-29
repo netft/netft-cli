@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -90,12 +91,36 @@ TEST(TerminalMonitor, ShorterFrameOverwritesEveryCharacterOfLongerFrame) {
   large.rdt_sequence = 4'000'000'001U;
   large.ft_sequence = 4'000'000'000U;
   large.status = 4'000'000'002U;
-  large.lost_count = 9'000'000'000ULL;
-  large.duplicate_count = 8'000'000'000ULL;
-  large.out_of_order_count = 7'000'000'000ULL;
+  large.lost_count = std::numeric_limits<std::uint64_t>::max();
+  large.duplicate_count = std::numeric_limits<std::uint64_t>::max() - 1;
+  large.out_of_order_count = std::numeric_limits<std::uint64_t>::max() - 2;
   large.elapsed_seconds = 999'999.99999;
 
   monitor.render(large);
+  const auto large_frame = terminal.screen_text();
+  for (const auto value : {"host=sensor-with-a-very-long-host-name",
+                           "state=streaming-with-an-unusually-long-state",
+                           "rate_hz=",
+                           "9999999.99",
+                           "rdt=4000000001",
+                           "ft=4000000000",
+                           "status=4000000002",
+                           "lost=18446744073709551615",
+                           "duplicate=18446744073709551614",
+                           "out_of_order=18446744073709551613",
+                           "Elapsed",
+                           "999999.99999",
+                           "Raw",
+                           "10",
+                           "-60",
+                           "Converted",
+                           "1.25000",
+                           "-6.75000",
+                           "Units",
+                           "N-mm"}) {
+    EXPECT_NE(large_frame.find(value), std::string::npos) << value;
+  }
+
   monitor.render(test::sample_record());
 
   const auto writes = terminal.writes();

@@ -90,6 +90,15 @@ public:
 
   const std::vector<std::string> &screen_rows() const noexcept { return screen_rows_; }
 
+  std::string screen_text() const {
+    std::string text;
+    for (const auto &row : screen_rows_) {
+      text += row;
+      text.push_back('\n');
+    }
+    return text;
+  }
+
 private:
   std::size_t count(TerminalOperationType type) const noexcept {
     std::size_t result = 0;
