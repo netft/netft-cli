@@ -15,12 +15,23 @@ constexpr std::size_t numeric_width = 14;
 constexpr std::size_t frame_width = label_width + (6 * numeric_width);
 constexpr std::size_t frame_height = 8;
 
+std::string sanitize_human_text(std::string_view text) {
+  std::string sanitized;
+  sanitized.reserve(text.size());
+  for (const char character : text) {
+    const auto byte = static_cast<unsigned char>(character);
+    sanitized.push_back(byte < 0x20U || byte == 0x7FU ? '?' : character);
+  }
+  return sanitized;
+}
+
 std::string fixed_field(std::string_view value, std::size_t width) {
-  if (value.size() > width) {
+  const auto sanitized = sanitize_human_text(value);
+  if (sanitized.size() > width) {
     std::string overflow(width, '#');
     return overflow;
   }
-  return std::string(width - value.size(), ' ') + std::string{value};
+  return std::string(width - sanitized.size(), ' ') + sanitized;
 }
 
 std::string fixed_integer(std::int32_t value) {
@@ -39,6 +50,27 @@ std::string decimal(double value, int precision) {
   return stream.str();
 }
 
+std::string pad_frame_rows(std::string_view frame) {
+  std::string padded;
+  padded.reserve((frame_width + 1) * frame_height);
+  std::size_t start = 0;
+  while (start < frame.size()) {
+    const auto end = frame.find('\n', start);
+    const auto row =
+        frame.substr(start, end == std::string_view::npos ? frame.size() - start : end - start);
+    padded.append(row.substr(0, frame_width));
+    if (row.size() < frame_width) {
+      padded.append(frame_width - row.size(), ' ');
+    }
+    padded.push_back('\n');
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+  return padded;
+}
+
 template <typename Values, typename Formatter>
 void append_measurement_row(std::ostringstream &stream, std::string_view label,
                             const Values &values, Formatter formatter) {
@@ -51,7 +83,8 @@ void append_measurement_row(std::ostringstream &stream, std::string_view label,
 
 std::string render_frame(const SampleRecord &record) {
   std::ostringstream stream;
-  stream << "NetFT monitor  host=" << record.host << "  state=" << record.state
+  stream << "NetFT monitor  host=" << sanitize_human_text(record.host)
+         << "  state=" << sanitize_human_text(record.state)
          << "  rate_hz=" << decimal(record.receive_rate_hz, 2) << '\n';
   stream << "Sequences  rdt=" << record.rdt_sequence << "  ft=" << record.ft_sequence
          << "  status=" << record.status << '\n';
@@ -79,12 +112,13 @@ std::string render_frame(const SampleRecord &record) {
   }
   stream << '\n';
   stream << "Elapsed    " << decimal(record.elapsed_seconds, 5) << " s\n";
-  return stream.str();
+  return pad_frame_rows(stream.str());
 }
 
 std::string render_compact_line(const SampleRecord &record) {
   std::ostringstream stream;
-  stream << "host=" << record.host << " state=" << record.state
+  stream << "host=" << sanitize_human_text(record.host)
+         << " state=" << sanitize_human_text(record.state)
          << " rate_hz=" << decimal(record.receive_rate_hz, 2) << " rdt=" << record.rdt_sequence
          << " ft=" << record.ft_sequence << " status=" << record.status
          << " lost=" << record.lost_count << " duplicate=" << record.duplicate_count
@@ -102,7 +136,8 @@ std::string render_compact_line(const SampleRecord &record) {
     }
     stream << decimal(record.scaled[index], 5);
   }
-  stream << "] units=[" << record.force_unit << ',' << record.torque_unit << "]\n";
+  stream << "] units=[" << sanitize_human_text(record.force_unit) << ','
+         << sanitize_human_text(record.torque_unit) << "]\n";
   return stream.str();
 }
 
@@ -113,7 +148,8 @@ void append_sample_text(std::ostringstream &stream, std::string_view label,
                          [](std::int32_t value) { return fixed_integer(value); });
   append_measurement_row(stream, "Converted", record.scaled,
                          [](double value) { return fixed_decimal(value); });
-  stream << "Units: force=" << record.force_unit << " torque=" << record.torque_unit << '\n';
+  stream << "Units: force=" << sanitize_human_text(record.force_unit)
+         << " torque=" << sanitize_human_text(record.torque_unit) << '\n';
 }
 
 bool supports_frame(TerminalCapabilities capabilities) {
@@ -125,14 +161,14 @@ bool supports_frame(TerminalCapabilities capabilities) {
 
 std::string render_configuration_text(const ConfigurationRecord &record) {
   std::ostringstream stream;
-  stream << "Sensor: " << record.product_name << '\n';
-  stream << "Endpoint: " << record.host << " HTTP " << record.http_port << " RDT "
-         << record.rdt_port << '\n';
+  stream << "Sensor: " << sanitize_human_text(record.product_name) << '\n';
+  stream << "Endpoint: " << sanitize_human_text(record.host) << " HTTP " << record.http_port
+         << " RDT " << record.rdt_port << '\n';
   stream << "Force calibration: " << decimal(record.counts_per_force_unit, 5) << " counts/"
-         << record.force_unit << '\n';
+         << sanitize_human_text(record.force_unit) << '\n';
   stream << "Torque calibration: " << decimal(record.counts_per_torque_unit, 5) << " counts/"
-         << record.torque_unit << '\n';
-  stream << "Calibration source: " << record.calibration_source
+         << sanitize_human_text(record.torque_unit) << '\n';
+  stream << "Calibration source: " << sanitize_human_text(record.calibration_source)
          << " revision=" << record.configuration_revision << '\n';
   return stream.str();
 }

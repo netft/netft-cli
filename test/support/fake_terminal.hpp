@@ -29,12 +29,41 @@ public:
     return capabilities_;
   }
 
-  void clear_frame() override { operations_.push_back({TerminalOperationType::ClearFrame, {}}); }
+  void clear_frame() override {
+    operations_.push_back({TerminalOperationType::ClearFrame, {}});
+    screen_rows_.clear();
+    cursor_row_ = 0;
+    cursor_column_ = 0;
+  }
 
-  void home() override { operations_.push_back({TerminalOperationType::Home, {}}); }
+  void home() override {
+    operations_.push_back({TerminalOperationType::Home, {}});
+    cursor_row_ = 0;
+    cursor_column_ = 0;
+  }
 
   void write(std::string_view text) override {
     operations_.push_back({TerminalOperationType::Write, std::string{text}});
+    for (const char character : text) {
+      if (character == '\n') {
+        ++cursor_row_;
+        cursor_column_ = 0;
+        continue;
+      }
+      if (character == '\r') {
+        cursor_column_ = 0;
+        continue;
+      }
+      if (screen_rows_.size() <= cursor_row_) {
+        screen_rows_.resize(cursor_row_ + 1);
+      }
+      auto &row = screen_rows_[cursor_row_];
+      if (row.size() <= cursor_column_) {
+        row.resize(cursor_column_ + 1, ' ');
+      }
+      row[cursor_column_] = character;
+      ++cursor_column_;
+    }
   }
 
   void flush() override { operations_.push_back({TerminalOperationType::Flush, {}}); }
@@ -59,6 +88,8 @@ public:
 
   const std::vector<TerminalOperation> &operations() const noexcept { return operations_; }
 
+  const std::vector<std::string> &screen_rows() const noexcept { return screen_rows_; }
+
 private:
   std::size_t count(TerminalOperationType type) const noexcept {
     std::size_t result = 0;
@@ -72,6 +103,9 @@ private:
 
   TerminalCapabilities capabilities_;
   std::vector<TerminalOperation> operations_;
+  std::vector<std::string> screen_rows_;
+  std::size_t cursor_row_{};
+  std::size_t cursor_column_{};
 };
 
 } // namespace netft_cli::test

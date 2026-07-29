@@ -37,6 +37,13 @@ std::string_view line_starting_with(const std::string &text, std::string_view pr
   return found == rendered_lines.end() ? std::string_view{} : *found;
 }
 
+bool contains_unsafe_terminal_control(std::string_view text) {
+  return std::any_of(text.begin(), text.end(), [](char character) {
+    const auto byte = static_cast<unsigned char>(character);
+    return (byte < 0x20U && character != '\n') || byte == 0x7FU;
+  });
+}
+
 TEST(TerminalMonitor, ReusesOneFrameAndDoesNotAppendHistory) {
   test::FakeTerminal terminal(TerminalCapabilities{100, 24, true});
   TerminalMonitor monitor(terminal);
@@ -73,6 +80,33 @@ TEST(TerminalMonitor, KeepsRawAndConvertedColumnsFixedAcrossMagnitudes) {
   EXPECT_EQ(small_converted.size(), large_converted.size());
 }
 
+TEST(TerminalMonitor, ShorterFrameOverwritesEveryCharacterOfLongerFrame) {
+  test::FakeTerminal terminal(TerminalCapabilities{100, 24, true});
+  TerminalMonitor monitor(terminal);
+  auto large = test::sample_record();
+  large.host = "sensor-with-a-very-long-host-name";
+  large.state = "streaming-with-an-unusually-long-state";
+  large.receive_rate_hz = 9'999'999.99;
+  large.rdt_sequence = 4'000'000'001U;
+  large.ft_sequence = 4'000'000'000U;
+  large.status = 4'000'000'002U;
+  large.lost_count = 9'000'000'000ULL;
+  large.duplicate_count = 8'000'000'000ULL;
+  large.out_of_order_count = 7'000'000'000ULL;
+  large.elapsed_seconds = 999'999.99999;
+
+  monitor.render(large);
+  monitor.render(test::sample_record());
+
+  const auto writes = terminal.writes();
+  ASSERT_EQ(writes.size(), 2U);
+  const auto second_frame = lines(writes.back());
+  ASSERT_EQ(terminal.screen_rows().size(), second_frame.size());
+  for (std::size_t row = 0; row < second_frame.size(); ++row) {
+    EXPECT_EQ(terminal.screen_rows()[row], second_frame[row]) << "row " << row;
+  }
+}
+
 TEST(TerminalMonitor, IncludesMeasurementsUnitsAndConnectionHealth) {
   test::FakeTerminal terminal(TerminalCapabilities{100, 24, true});
   TerminalMonitor monitor(terminal);
@@ -104,6 +138,39 @@ TEST(TerminalMonitor, NonAnsiOutputHasNoCursorOperationsOrEscapeBytes) {
   for (const auto &text : writes) {
     EXPECT_EQ(text.find('\x1b'), std::string::npos);
     EXPECT_EQ(text.back(), '\n');
+  }
+}
+
+TEST(HumanRendering, ExternalTextCannotInjectTerminalControls) {
+  auto unsafe_sample = test::sample_record();
+  unsafe_sample.host = "sensor\x1b[2J\nsecond-row";
+  unsafe_sample.state = "streaming\rspoofed\tstate";
+  unsafe_sample.force_unit = "N\x1b]0;owned\a";
+  unsafe_sample.torque_unit = "N-mm\b\x7f";
+
+  test::FakeTerminal ansi_terminal(TerminalCapabilities{100, 24, true});
+  TerminalMonitor ansi_monitor(ansi_terminal);
+  ansi_monitor.render(unsafe_sample);
+
+  test::FakeTerminal compact_terminal(TerminalCapabilities{80, 24, false});
+  TerminalMonitor compact_monitor(compact_terminal);
+  compact_monitor.render(unsafe_sample);
+
+  auto configuration = make_configuration_record(test::connection_options(), test::configuration());
+  configuration.host = unsafe_sample.host;
+  configuration.product_name = "product\x1b[31mred";
+  configuration.force_unit = unsafe_sample.force_unit;
+  configuration.torque_unit = unsafe_sample.torque_unit;
+  configuration.calibration_source = "sensor\nforged";
+  const BiasRecord bias{configuration, unsafe_sample, unsafe_sample};
+
+  const auto ansi_writes = ansi_terminal.writes();
+  const auto compact_writes = compact_terminal.writes();
+  ASSERT_EQ(ansi_writes.size(), 1U);
+  ASSERT_EQ(compact_writes.size(), 1U);
+  for (const auto &text : {ansi_writes.front(), compact_writes.front(),
+                           render_configuration_text(configuration), render_bias_text(bias)}) {
+    EXPECT_FALSE(contains_unsafe_terminal_control(text));
   }
 }
 
