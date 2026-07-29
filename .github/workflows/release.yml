@@ -226,6 +226,8 @@ jobs:
   draft_release:
     needs: [assemble, attest]
     runs-on: ubuntu-24.04
+    outputs:
+      release_id: ${{ steps.release_state.outputs.release_id }}
     permissions:
       contents: write
     steps:
@@ -236,7 +238,8 @@ jobs:
         with:
           name: release-bundle
           path: release
-      - env:
+      - id: release_state
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -245,8 +248,10 @@ jobs:
           release_endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}"
           if gh api "${release_endpoint}" \
               >"${metadata}" 2>/dev/null; then
-            python3 tools/release_inventory.py asset-ids \
-              --metadata "${metadata}" >"${asset_ids}"
+            release_id="$(
+              python3 tools/release_inventory.py release-id \
+                --metadata "${metadata}"
+            )"
           else
             gh release create "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
@@ -254,14 +259,32 @@ jobs:
               --draft \
               --notes-file release/RELEASE_NOTES.md
             gh api "${release_endpoint}" >"${metadata}"
-            python3 tools/release_inventory.py asset-ids \
-              --metadata "${metadata}" >"${asset_ids}"
+            release_id="$(
+              python3 tools/release_inventory.py release-id \
+                --metadata "${metadata}"
+            )"
           fi
+
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            -F draft=true \
+            -F prerelease=false \
+            >/dev/null
+          gh api "${release_endpoint}" >"${metadata}"
+          python3 tools/release_inventory.py validate-draft \
+            --metadata "${metadata}" \
+            --expected-release-id "${release_id}"
+          python3 tools/release_inventory.py asset-ids \
+            --metadata "${metadata}" \
+            --expected-release-id "${release_id}" \
+            >"${asset_ids}"
 
           while IFS= read -r asset_id; do
             gh api "${release_endpoint}" >"${metadata}"
             python3 tools/release_inventory.py asset-ids \
-              --metadata "${metadata}" >"${RUNNER_TEMP}/current-asset-ids"
+              --metadata "${metadata}" \
+              --expected-release-id "${release_id}" \
+              >"${RUNNER_TEMP}/current-asset-ids"
             grep -Fxq "${asset_id}" "${RUNNER_TEMP}/current-asset-ids"
             gh api --method DELETE \
               "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
@@ -271,13 +294,19 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --draft \
             --notes-file release/RELEASE_NOTES.md
+          gh api "${release_endpoint}" >"${metadata}"
+          python3 tools/release_inventory.py validate-draft \
+            --metadata "${metadata}" \
+            --expected-release-id "${release_id}"
           gh release upload "${GITHUB_REF_NAME}" \
             release/dist/* \
             --repo "${GITHUB_REPOSITORY}"
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-remote \
             --metadata "${metadata}" \
-            --version "${GITHUB_REF_NAME#v}"
+            --version "${GITHUB_REF_NAME#v}" \
+            --expected-release-id "${release_id}"
+          echo "release_id=${release_id}" >>"${GITHUB_OUTPUT}"
 
   smoke:
     needs: draft_release
@@ -305,6 +334,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_ID: ${{ needs.draft_release.outputs.release_id }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -316,7 +346,8 @@ jobs:
             >"${RUNNER_TEMP}/release-metadata.json"
           python3 tools/release_inventory.py validate-remote \
             --metadata "${RUNNER_TEMP}/release-metadata.json" \
-            --version "${version}"
+            --version "${version}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}"
           gh release download "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --dir "${asset_directory}"
@@ -350,6 +381,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_ID: ${{ needs.draft_release.outputs.release_id }}
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
@@ -359,6 +391,7 @@ jobs:
             }
           }
           $Version = $env:GITHUB_REF_NAME.Substring(1)
+          $ExpectedReleaseId = [int64]$env:EXPECTED_RELEASE_ID
           $Root = Join-Path $env:RUNNER_TEMP "release-root"
           $Assets = Join-Path $Root "releases\download\$env:GITHUB_REF_NAME"
           $Install = Join-Path $env:RUNNER_TEMP "netft-install"
@@ -369,7 +402,8 @@ jobs:
           Assert-NativeSuccess
           python tools/release_inventory.py validate-remote `
             --metadata $Metadata `
-            --version $Version
+            --version $Version `
+            --expected-release-id $ExpectedReleaseId
           Assert-NativeSuccess
           gh release download $env:GITHUB_REF_NAME `
             --repo $env:GITHUB_REPOSITORY `
@@ -411,7 +445,7 @@ jobs:
           }
 
   publish:
-    needs: smoke
+    needs: [smoke, draft_release]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -421,6 +455,7 @@ jobs:
           persist-credentials: false
       - env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_ID: ${{ needs.draft_release.outputs.release_id }}
         run: |
           set -euo pipefail
           gh api \
@@ -428,7 +463,9 @@ jobs:
             >"${RUNNER_TEMP}/release-metadata.json"
           python3 tools/release_inventory.py validate-remote \
             --metadata "${RUNNER_TEMP}/release-metadata.json" \
-            --version "${GITHUB_REF_NAME#v}"
+            --version "${GITHUB_REF_NAME#v}" \
+            --expected-release-id "${EXPECTED_RELEASE_ID}"
           gh release edit "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --draft=false
+            --draft=false \
+            --prerelease=false

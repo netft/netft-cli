@@ -114,14 +114,55 @@ def assert_pwsh_fail_fast(script: str) -> None:
     )
     assert script.index(error_preference) < first_command
     assert script.index(native_preference) < first_command
-    critical_native_command = re.search(
-        r"(?m)^\s*(?:cmake|ctest|gh|python|vcpkg)\b"
-        r"|^\s*&\s+.*netft(?:\.exe)?\b",
-        script,
-    )
-    if critical_native_command is not None:
+    commands = logical_pwsh_commands(script)
+    critical_indexes = [
+        index
+        for index, command in enumerate(commands)
+        if re.search(
+            r"^(?:cmake|ctest|gh|python|pwsh|vcpkg)\b"
+            r"|^&\s+.*netft(?:\.exe)?\b"
+            r"|=\s*git\b",
+            command,
+        )
+    ]
+    if critical_indexes:
         assert "function Assert-NativeSuccess" in script
-        assert len(re.findall(r"(?m)^\s*Assert-NativeSuccess\s*$", script)) >= 1
+    for index in critical_indexes:
+        assert index + 1 < len(commands)
+        assert commands[index + 1] == "Assert-NativeSuccess"
+
+
+def logical_pwsh_commands(script: str) -> list[str]:
+    commands: list[str] = []
+    continued: list[str] = []
+    here_string = False
+    for raw_line in script.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if here_string:
+            continued.append(line)
+            if line == "'@":
+                commands.append(" ".join(continued))
+                continued = []
+                here_string = False
+            continue
+        if line.endswith("@'"):
+            continued.append(line)
+            here_string = True
+            continue
+        if line.endswith("`"):
+            continued.append(line[:-1].rstrip())
+            continue
+        if continued:
+            continued.append(line)
+            commands.append(" ".join(continued))
+            continued = []
+            continue
+        commands.append(line)
+    assert not continued
+    assert not here_string
+    return commands
 
 
 @pytest.mark.parametrize("name", ["ci", "codeql", "coverage", "release"])
@@ -207,6 +248,24 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     with pytest.raises(AssertionError):
         assert_pwsh_fail_fast(unsafe)
+
+
+def test_windows_installer_suite_runs_in_a_fresh_powershell_process() -> None:
+    workflow = load_yaml(WORKFLOW_DIRECTORY / "ci.yml")
+    native = workflow["jobs"]["native"]
+    installer_step = next(
+        step
+        for step in native["steps"]
+        if "NETFT_EXECUTABLE" in step.get("env", {})
+    )
+    script = str(installer_step["run"])
+
+    assert (
+        "pwsh -NoProfile -File test/artifact/install_ps1_test.ps1"
+        in script
+    )
+    assert "& test/artifact/install_ps1_test.ps1" not in script
+    assert "Assert-NativeSuccess" in script
 
 
 def test_linux_complete_check_includes_workflow_contracts() -> None:
@@ -316,18 +375,23 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
     }
     assert jobs["draft_release"]["needs"] == ["assemble", "attest"]
     assert jobs["draft_release"]["permissions"] == {"contents": "write"}
+    assert jobs["draft_release"]["outputs"]["release_id"]
     assert "--draft" in commands(jobs["draft_release"])
     draft_script = commands(jobs["draft_release"])
     assert "asset-ids" in draft_script
     assert "--method DELETE" in draft_script
     assert "validate-remote" in draft_script
+    assert "validate-draft" in draft_script
+    assert "--expected-release-id" in draft_script
     assert "releases/tags/" in draft_script
+    assert "-F prerelease=false" in draft_script
     assert matrix_targets(jobs["smoke"]) == TARGETS
     assert jobs["smoke"]["needs"] == "draft_release"
     smoke_script = commands(jobs["smoke"])
     assert "gh release download" in smoke_script
     assert "--pattern" not in smoke_script
     assert "validate-remote" in smoke_script
+    assert "--expected-release-id" in smoke_script
     assert "releases/tags/" in smoke_script
     assert "scripts/install/install.sh" in smoke_script
     assert "scripts/install/install.ps1" in smoke_script
@@ -336,9 +400,11 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
         in smoke_script
     )
     assert '"http://127.0.0.1:49152/releases"' in smoke_script
-    assert jobs["publish"]["needs"] == "smoke"
+    assert jobs["publish"]["needs"] == ["smoke", "draft_release"]
     assert jobs["publish"]["permissions"] == {"contents": "write"}
     assert "validate-remote" in commands(jobs["publish"])
+    assert "--expected-release-id" in commands(jobs["publish"])
+    assert "--prerelease=false" in commands(jobs["publish"])
     assert "releases/tags/" in commands(jobs["publish"])
     assert (
         'gh release edit "${GITHUB_REF_NAME}" \\\n'
@@ -351,17 +417,24 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
     release_inventory = load_release_inventory_module()
     names = sorted(release_inventory.expected_asset_names("0.1.0"))
     metadata = {
+        "id": 41,
         "draft": True,
+        "prerelease": False,
         "assets": [
             {"id": index + 1, "name": name}
             for index, name in enumerate(names)
         ],
     }
 
-    release_inventory.validate_remote_inventory(metadata, "0.1.0")
+    release_inventory.validate_remote_inventory(
+        metadata, "0.1.0", expected_release_id=41
+    )
 
     for changed in (
         {**metadata, "draft": False},
+        {**metadata, "prerelease": True},
+        {key: value for key, value in metadata.items() if key != "prerelease"},
+        {**metadata, "id": 42},
         {**metadata, "assets": metadata["assets"][:-1]},
         {
             **metadata,
@@ -379,23 +452,31 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
         },
     ):
         with pytest.raises(release_inventory.ReleaseInventoryError):
-            release_inventory.validate_remote_inventory(changed, "0.1.0")
+            release_inventory.validate_remote_inventory(
+                changed, "0.1.0", expected_release_id=41
+            )
 
 
 def test_draft_cleanup_returns_only_valid_asset_ids() -> None:
     release_inventory = load_release_inventory_module()
     metadata = {
+        "id": 41,
         "draft": True,
+        "prerelease": False,
         "assets": [
             {"id": 17, "name": "stale"},
             {"id": 23, "name": "older"},
         ],
     }
 
-    assert release_inventory.draft_asset_ids(metadata) == [17, 23]
+    assert release_inventory.draft_asset_ids(
+        metadata, expected_release_id=41
+    ) == [17, 23]
 
     with pytest.raises(release_inventory.ReleaseInventoryError):
-        release_inventory.draft_asset_ids({**metadata, "draft": False})
+        release_inventory.draft_asset_ids(
+            {**metadata, "draft": False}, expected_release_id=41
+        )
 
     malformed = {
         **metadata,
@@ -404,7 +485,23 @@ def test_draft_cleanup_returns_only_valid_asset_ids() -> None:
         ],
     }
     with pytest.raises(release_inventory.ReleaseInventoryError):
-        release_inventory.draft_asset_ids(malformed)
+        release_inventory.draft_asset_ids(
+            malformed, expected_release_id=41
+        )
+
+
+def test_existing_draft_identity_can_be_normalized_from_prerelease() -> None:
+    release_inventory = load_release_inventory_module()
+    existing = {
+        "id": 41,
+        "draft": True,
+        "prerelease": True,
+        "assets": [],
+    }
+
+    assert release_inventory.draft_release_id(existing) == 41
+    with pytest.raises(release_inventory.ReleaseInventoryError):
+        release_inventory.draft_release_id({**existing, "draft": False})
 
 
 def test_release_notes_join_wrapped_bullet_continuations() -> None:

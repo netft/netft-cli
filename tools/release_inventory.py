@@ -34,8 +34,40 @@ def expected_asset_names(version: str) -> set[str]:
     return {*archives, "SHA256SUMS"}
 
 
-def _validated_assets(metadata: Any) -> list[dict[str, Any]]:
-    if not isinstance(metadata, dict) or metadata.get("draft") is not True:
+def draft_release_id(metadata: Any) -> int:
+    """Return the numeric REST ID for an existing draft of either kind."""
+    if not isinstance(metadata, dict):
+        raise ReleaseInventoryError("release metadata is invalid")
+    release_id = metadata.get("id")
+    if (
+        not isinstance(release_id, int)
+        or isinstance(release_id, bool)
+        or release_id <= 0
+        or metadata.get("draft") is not True
+        or not isinstance(metadata.get("prerelease"), bool)
+    ):
+        raise ReleaseInventoryError("release is not a valid draft")
+    return release_id
+
+
+def _validate_draft_identity(metadata: Any, expected_release_id: int) -> None:
+    release_id = draft_release_id(metadata)
+    if (
+        not isinstance(expected_release_id, int)
+        or isinstance(expected_release_id, bool)
+        or expected_release_id <= 0
+        or release_id != expected_release_id
+    ):
+        raise ReleaseInventoryError("release identity changed")
+    if metadata.get("prerelease") is not False:
+        raise ReleaseInventoryError("release is a prerelease")
+
+
+def _validated_assets(
+    metadata: Any, expected_release_id: int
+) -> list[dict[str, Any]]:
+    _validate_draft_identity(metadata, expected_release_id)
+    if not isinstance(metadata, dict):
         raise ReleaseInventoryError("release is not a draft")
     assets = metadata.get("assets")
     if not isinstance(assets, list):
@@ -61,14 +93,24 @@ def _validated_assets(metadata: Any) -> list[dict[str, Any]]:
     return validated
 
 
-def draft_asset_ids(metadata: Any) -> list[int]:
+def validate_draft(metadata: Any, expected_release_id: int) -> None:
+    """Require the same stable draft identity without constraining assets."""
+    _validate_draft_identity(metadata, expected_release_id)
+    _validated_assets(metadata, expected_release_id)
+
+
+def draft_asset_ids(metadata: Any, expected_release_id: int) -> list[int]:
     """Return IDs only after proving that their release is still a draft."""
-    return [asset["id"] for asset in _validated_assets(metadata)]
+    return [
+        asset["id"] for asset in _validated_assets(metadata, expected_release_id)
+    ]
 
 
-def validate_remote_inventory(metadata: Any, version: str) -> None:
+def validate_remote_inventory(
+    metadata: Any, version: str, expected_release_id: int
+) -> None:
     """Require one exact six-file asset inventory on a draft release."""
-    assets = _validated_assets(metadata)
+    assets = _validated_assets(metadata, expected_release_id)
     names = [asset["name"] for asset in assets]
     expected = expected_asset_names(version)
     if len(names) != len(set(names)):
@@ -89,18 +131,33 @@ def main() -> int:
     subcommands = parser.add_subparsers(dest="command", required=True)
     asset_ids = subcommands.add_parser("asset-ids")
     asset_ids.add_argument("--metadata", type=Path, required=True)
+    asset_ids.add_argument("--expected-release-id", type=int, required=True)
+    release_id = subcommands.add_parser("release-id")
+    release_id.add_argument("--metadata", type=Path, required=True)
+    draft = subcommands.add_parser("validate-draft")
+    draft.add_argument("--metadata", type=Path, required=True)
+    draft.add_argument("--expected-release-id", type=int, required=True)
     validate = subcommands.add_parser("validate-remote")
     validate.add_argument("--metadata", type=Path, required=True)
     validate.add_argument("--version", required=True)
+    validate.add_argument("--expected-release-id", type=int, required=True)
     arguments = parser.parse_args()
 
     try:
         metadata = _load_metadata(arguments.metadata)
         if arguments.command == "asset-ids":
-            for asset_id in draft_asset_ids(metadata):
+            for asset_id in draft_asset_ids(
+                metadata, arguments.expected_release_id
+            ):
                 print(asset_id)
+        elif arguments.command == "release-id":
+            print(draft_release_id(metadata))
+        elif arguments.command == "validate-draft":
+            validate_draft(metadata, arguments.expected_release_id)
         else:
-            validate_remote_inventory(metadata, arguments.version)
+            validate_remote_inventory(
+                metadata, arguments.version, arguments.expected_release_id
+            )
     except ReleaseInventoryError as error:
         raise SystemExit(f"release inventory validation failed: {error}") from error
     return 0

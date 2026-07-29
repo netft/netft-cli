@@ -127,4 +127,10 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
-          & test/artifact/install_ps1_test.ps1
+          function Assert-NativeSuccess {
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native command failed with exit code $LASTEXITCODE."
+            }
+          }
+          pwsh -NoProfile -File test/artifact/install_ps1_test.ps1
+          Assert-NativeSuccess
