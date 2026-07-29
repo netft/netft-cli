@@ -109,6 +109,48 @@ TEST(MonitorCommand, SkipsMissedDeadlinesInsteadOfReplayingHistory) {
   EXPECT_EQ(clock.deadlines()[1].time_since_epoch(), 200ms);
 }
 
+TEST(MonitorCommand, ExactMultipleOversleepRebasesPastTheActualRenderTime) {
+  test::FakeBackend backend;
+  backend.set_configuration(test::configuration());
+  backend.session().set_samples({test::sample(4), test::sample(5), test::sample(6)});
+  backend.session().set_health(test::health());
+  test::FakeClock clock;
+  clock.set_next_sleep_overshoot(100ms);
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+
+  EXPECT_EQ(run_monitor(test::monitor_for(200ms), backend, output.context(), interrupt, clock), 0);
+
+  const auto documents = test::parse_ndjson(output.standard_output_text());
+  ASSERT_EQ(documents.size(), 2U);
+  EXPECT_EQ(documents[0]["rdt_sequence"], 6U);
+  EXPECT_EQ(documents[1]["rdt_sequence"], 6U);
+  ASSERT_EQ(clock.deadlines().size(), 2U);
+  EXPECT_EQ(clock.deadlines()[0].time_since_epoch(), 50ms);
+  EXPECT_GT(clock.deadlines()[1].time_since_epoch(), 150ms);
+  EXPECT_EQ(clock.deadlines()[1].time_since_epoch(), 200ms);
+}
+
+TEST(MonitorCommand, LongSuspendRebasesDirectlyToTheNextOriginBasedDeadline) {
+  test::FakeBackend backend;
+  backend.set_configuration(test::configuration());
+  backend.session().set_samples({test::sample(15)});
+  backend.session().set_health(test::health());
+  test::FakeClock clock;
+  clock.set_next_sleep_overshoot(24h + 25ms);
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+
+  EXPECT_EQ(
+      run_monitor(test::monitor_for(24h + 100ms), backend, output.context(), interrupt, clock), 0);
+
+  EXPECT_EQ(test::parse_ndjson(output.standard_output_text()).size(), 2U);
+  ASSERT_EQ(clock.deadlines().size(), 2U);
+  EXPECT_EQ(clock.deadlines()[0].time_since_epoch(), 50ms);
+  EXPECT_GT(clock.deadlines()[1].time_since_epoch(), 24h + 75ms);
+  EXPECT_EQ(clock.deadlines()[1].time_since_epoch(), 24h + 100ms);
+}
+
 TEST(MonitorCommand, WritesCsvOnlyWhenExplicitlySelected) {
   test::FakeBackend backend;
   backend.set_configuration(test::configuration());

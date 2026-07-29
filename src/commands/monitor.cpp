@@ -142,6 +142,15 @@ Clock::Duration duration_ticks(std::chrono::duration<double> duration) {
   return std::chrono::duration_cast<Clock::Duration>(duration);
 }
 
+Clock::TimePoint first_deadline_after(Clock::TimePoint origin, Clock::Duration period,
+                                      Clock::TimePoint time) {
+  if (time < origin) {
+    return origin + period;
+  }
+  const auto completed_periods = (time - origin) / period;
+  return origin + period * (completed_periods + 1);
+}
+
 } // namespace
 
 int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputContext &output,
@@ -197,8 +206,8 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
     }
 
     auto now = clock.now();
-    while (deadline < now) {
-      deadline += period;
+    if (deadline < now) {
+      deadline = first_deadline_after(origin, period, now);
     }
     if (end && deadline > *end) {
       return finish(0);
@@ -219,7 +228,7 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
       throw AppError{ExitCode::Stream, "sensor stream has no current sample"};
     }
     sample_output.write(make_sample_record(*sample, health, origin));
-    deadline += period;
+    deadline = first_deadline_after(origin, period, clock.now());
   }
 }
 
