@@ -27,11 +27,18 @@ netft_enable_sanitizers(netft_cli_options)
 
 add_library(netft_cli_output
   src/sensor/netft_backend.cpp
+  src/platform/interrupt.cpp
   src/output/records.cpp
   src/output/context.cpp
   src/output/json.cpp
   src/output/csv.cpp
+  src/output/terminal.cpp
 )
+if(WIN32)
+  target_sources(netft_cli_output PRIVATE src/platform/terminal_windows.cpp)
+else()
+  target_sources(netft_cli_output PRIVATE src/platform/terminal_posix.cpp)
+endif()
 target_compile_features(netft_cli_output PUBLIC cxx_std_17)
 target_include_directories(netft_cli_output PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(netft_cli_output PUBLIC netft_core netft_cli_options)
@@ -70,6 +77,19 @@ if(BUILD_TESTING)
   netft_enable_sanitizers(netft_test_support)
 
   foreach(test_name IN ITEMS records json csv)
+    add_executable(netft_${test_name}_test test/unit/${test_name}_test.cpp)
+    target_compile_features(netft_${test_name}_test PRIVATE cxx_std_17)
+    target_link_libraries(netft_${test_name}_test PRIVATE
+      netft_cli_output
+      netft_test_support
+      GTest::gtest_main
+    )
+    netft_enable_warnings(netft_${test_name}_test)
+    netft_enable_sanitizers(netft_${test_name}_test)
+    add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
+  endforeach()
+
+  foreach(test_name IN ITEMS interrupt terminal)
     add_executable(netft_${test_name}_test test/unit/${test_name}_test.cpp)
     target_compile_features(netft_${test_name}_test PRIVATE cxx_std_17)
     target_link_libraries(netft_${test_name}_test PRIVATE

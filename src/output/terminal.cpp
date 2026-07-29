@@ -1,0 +1,187 @@
+#include "output/terminal.hpp"
+
+#include <array>
+#include <iomanip>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace netft_cli {
+namespace {
+
+constexpr std::size_t label_width = 10;
+constexpr std::size_t numeric_width = 14;
+constexpr std::size_t frame_width = label_width + (6 * numeric_width);
+constexpr std::size_t frame_height = 8;
+
+std::string fixed_field(std::string_view value, std::size_t width) {
+  if (value.size() > width) {
+    std::string overflow(width, '#');
+    return overflow;
+  }
+  return std::string(width - value.size(), ' ') + std::string{value};
+}
+
+std::string fixed_integer(std::int32_t value) {
+  return fixed_field(std::to_string(value), numeric_width);
+}
+
+std::string fixed_decimal(double value) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(5) << value;
+  return fixed_field(stream.str(), numeric_width);
+}
+
+std::string decimal(double value, int precision) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(precision) << value;
+  return stream.str();
+}
+
+template <typename Values, typename Formatter>
+void append_measurement_row(std::ostringstream &stream, std::string_view label,
+                            const Values &values, Formatter formatter) {
+  stream << std::left << std::setw(static_cast<int>(label_width)) << label << std::right;
+  for (const auto value : values) {
+    stream << formatter(value);
+  }
+  stream << '\n';
+}
+
+std::string render_frame(const SampleRecord &record) {
+  std::ostringstream stream;
+  stream << "NetFT monitor  host=" << record.host << "  state=" << record.state
+         << "  rate_hz=" << decimal(record.receive_rate_hz, 2) << '\n';
+  stream << "Sequences  rdt=" << record.rdt_sequence << "  ft=" << record.ft_sequence
+         << "  status=" << record.status << '\n';
+  stream << "Health     lost=" << record.lost_count << "  duplicate=" << record.duplicate_count
+         << "  out_of_order=" << record.out_of_order_count << '\n';
+
+  const std::array<std::string_view, 6> axes{"Fx", "Fy", "Fz", "Tx", "Ty", "Tz"};
+  stream << std::left << std::setw(static_cast<int>(label_width)) << "Axis" << std::right;
+  for (const auto axis : axes) {
+    stream << fixed_field(axis, numeric_width);
+  }
+  stream << '\n';
+
+  append_measurement_row(stream, "Raw", record.raw,
+                         [](std::int32_t value) { return fixed_integer(value); });
+  append_measurement_row(stream, "Converted", record.scaled,
+                         [](double value) { return fixed_decimal(value); });
+
+  const std::array<std::string, 6> units{record.force_unit,  record.force_unit,
+                                         record.force_unit,  record.torque_unit,
+                                         record.torque_unit, record.torque_unit};
+  stream << std::left << std::setw(static_cast<int>(label_width)) << "Units" << std::right;
+  for (const auto &unit : units) {
+    stream << fixed_field(unit, numeric_width);
+  }
+  stream << '\n';
+  stream << "Elapsed    " << decimal(record.elapsed_seconds, 5) << " s\n";
+  return stream.str();
+}
+
+std::string render_compact_line(const SampleRecord &record) {
+  std::ostringstream stream;
+  stream << "host=" << record.host << " state=" << record.state
+         << " rate_hz=" << decimal(record.receive_rate_hz, 2) << " rdt=" << record.rdt_sequence
+         << " ft=" << record.ft_sequence << " status=" << record.status
+         << " lost=" << record.lost_count << " duplicate=" << record.duplicate_count
+         << " out_of_order=" << record.out_of_order_count << " raw=[";
+  for (std::size_t index = 0; index < record.raw.size(); ++index) {
+    if (index != 0) {
+      stream << ',';
+    }
+    stream << record.raw[index];
+  }
+  stream << "] converted=[";
+  for (std::size_t index = 0; index < record.scaled.size(); ++index) {
+    if (index != 0) {
+      stream << ',';
+    }
+    stream << decimal(record.scaled[index], 5);
+  }
+  stream << "] units=[" << record.force_unit << ',' << record.torque_unit << "]\n";
+  return stream.str();
+}
+
+void append_sample_text(std::ostringstream &stream, std::string_view label,
+                        const SampleRecord &record) {
+  stream << label << " sequence: " << record.rdt_sequence << '\n';
+  append_measurement_row(stream, "Raw", record.raw,
+                         [](std::int32_t value) { return fixed_integer(value); });
+  append_measurement_row(stream, "Converted", record.scaled,
+                         [](double value) { return fixed_decimal(value); });
+  stream << "Units: force=" << record.force_unit << " torque=" << record.torque_unit << '\n';
+}
+
+bool supports_frame(TerminalCapabilities capabilities) {
+  return capabilities.ansi && capabilities.width >= frame_width &&
+         capabilities.height >= frame_height;
+}
+
+} // namespace
+
+std::string render_configuration_text(const ConfigurationRecord &record) {
+  std::ostringstream stream;
+  stream << "Sensor: " << record.product_name << '\n';
+  stream << "Endpoint: " << record.host << " HTTP " << record.http_port << " RDT "
+         << record.rdt_port << '\n';
+  stream << "Force calibration: " << decimal(record.counts_per_force_unit, 5) << " counts/"
+         << record.force_unit << '\n';
+  stream << "Torque calibration: " << decimal(record.counts_per_torque_unit, 5) << " counts/"
+         << record.torque_unit << '\n';
+  stream << "Calibration source: " << record.calibration_source
+         << " revision=" << record.configuration_revision << '\n';
+  return stream.str();
+}
+
+std::string render_bias_text(const BiasRecord &record) {
+  std::ostringstream stream;
+  stream << render_configuration_text(record.configuration);
+  append_sample_text(stream, "Before", record.before);
+  append_sample_text(stream, "After", record.after);
+  return stream.str();
+}
+
+TerminalMonitor::TerminalMonitor(TerminalWriter &terminal) noexcept : terminal_(terminal) {}
+
+TerminalMonitor::~TerminalMonitor() {
+  try {
+    close();
+  } catch (...) {
+    static_cast<void>(0);
+  }
+}
+
+void TerminalMonitor::render(const SampleRecord &record) {
+  if (closed_) {
+    throw std::logic_error("cannot render after closing terminal monitor");
+  }
+
+  if (supports_frame(terminal_.capabilities())) {
+    if (!frame_started_) {
+      terminal_.clear_frame();
+      frame_started_ = true;
+    }
+    terminal_.home();
+    terminal_.write(render_frame(record));
+  } else {
+    terminal_.write(render_compact_line(record));
+  }
+  terminal_.flush();
+}
+
+void TerminalMonitor::close() {
+  if (closed_) {
+    return;
+  }
+  closed_ = true;
+  if (frame_started_) {
+    terminal_.write("\n");
+    terminal_.flush();
+  }
+}
+
+} // namespace netft_cli
