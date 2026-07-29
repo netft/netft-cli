@@ -13,12 +13,6 @@ include(cmake/Warnings.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/NetftCore.cmake)
 
-add_executable(netft src/main.cpp)
-target_compile_features(netft PRIVATE cxx_std_17)
-target_link_libraries(netft PRIVATE netft_core)
-netft_enable_warnings(netft)
-netft_enable_sanitizers(netft)
-
 add_library(netft_cli_options src/cli/options.cpp)
 target_compile_features(netft_cli_options PUBLIC cxx_std_17)
 target_include_directories(netft_cli_options PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -64,6 +58,22 @@ target_include_directories(netft_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(netft_cli_commands PUBLIC netft_cli_output)
 netft_enable_warnings(netft_cli_commands)
 netft_enable_sanitizers(netft_cli_commands)
+
+add_library(netft_cli_application src/application.cpp)
+target_compile_features(netft_cli_application PUBLIC cxx_std_17)
+target_include_directories(netft_cli_application PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(netft_cli_application PUBLIC netft_cli_commands)
+target_compile_definitions(netft_cli_application PRIVATE
+  NETFT_CLI_VERSION="${PROJECT_VERSION}"
+)
+netft_enable_warnings(netft_cli_application)
+netft_enable_sanitizers(netft_cli_application)
+
+add_executable(netft src/main.cpp)
+target_compile_features(netft PRIVATE cxx_std_17)
+target_link_libraries(netft PRIVATE netft_cli_application)
+netft_enable_warnings(netft)
+netft_enable_sanitizers(netft)
 
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -188,6 +198,27 @@ if(BUILD_TESTING)
     netft_enable_sanitizers(netft_udp_port_isolation_test)
     add_test(NAME netft_udp_port_isolation COMMAND netft_udp_port_isolation_test)
   endif()
+
+  add_executable(netft_cli_integration_test
+    test/integration/cli_integration_test.cpp
+    test/integration/fake_sensor.cpp
+  )
+  target_compile_features(netft_cli_integration_test PRIVATE cxx_std_17)
+  target_include_directories(netft_cli_integration_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test"
+  )
+  target_link_libraries(netft_cli_integration_test PRIVATE
+    netft_cli_application
+    netft_test_support
+    GTest::gtest_main
+  )
+  if(WIN32)
+    target_link_libraries(netft_cli_integration_test PRIVATE ws2_32)
+  endif()
+  netft_enable_warnings(netft_cli_integration_test)
+  netft_enable_sanitizers(netft_cli_integration_test)
+  add_test(NAME netft_cli_integration COMMAND netft_cli_integration_test)
 
   add_test(
     NAME sync_core
