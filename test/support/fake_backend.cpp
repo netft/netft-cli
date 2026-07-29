@@ -5,17 +5,26 @@ namespace {
 
 class SharedSession final : public SensorSession {
 public:
-  explicit SharedSession(std::shared_ptr<FakeSession> session) : session_(std::move(session)) {}
+  SharedSession(std::shared_ptr<FakeSession> session, std::shared_ptr<bool> alive = {})
+      : session_(std::move(session)), alive_(std::move(alive)) {
+    if (alive_) {
+      *alive_ = true;
+    }
+  }
+  ~SharedSession() override {
+    if (alive_) {
+      *alive_ = false;
+    }
+  }
 
   void start(Callback callback) override { session_->start(std::move(callback)); }
   void stop() noexcept override { session_->stop(); }
-  void bias(BiasCompletion on_command_complete) override {
-    session_->bias(std::move(on_command_complete));
-  }
+  void stop_and_hold_port() noexcept override { session_->stop_and_hold_port(); }
   netft::HealthSnapshot health() const override { return session_->health(); }
 
 private:
   std::shared_ptr<FakeSession> session_;
+  std::shared_ptr<bool> alive_;
 };
 
 } // namespace
@@ -25,7 +34,21 @@ void FakeSession::start(Callback callback) {
   if (fail_start_) {
     throw std::runtime_error("fake start failure");
   }
+  if (biased_start_) {
+    startup_events_.push_back("bias");
+    ++bias_send_calls_;
+    startup_events_.push_back("start");
+    ++start_send_calls_;
+    if (fail_start_after_bias_) {
+      throw std::runtime_error("fake start realtime failure");
+    }
+    startup_events_.push_back("receive");
+    ++receive_calls_;
+  }
   callback_ = std::move(callback);
+  if (!samples_.empty() && before_first_sample_) {
+    before_first_sample_();
+  }
   for (const auto &sample : samples_) {
     callback_(sample);
   }
@@ -36,27 +59,17 @@ void FakeSession::stop() noexcept {
   callback_ = {};
 }
 
-void FakeSession::bias(BiasCompletion on_command_complete) {
-  ++bias_calls_;
-  if (fail_bias_) {
-    throw std::runtime_error("fake bias failure");
-  }
-  for (const auto &sample : during_bias_samples_) {
-    callback_(sample);
-  }
-  on_command_complete(bias_completion_epoch_);
-  for (const auto &sample : completion_boundary_samples_) {
-    callback_(sample);
-  }
-  for (auto sample : post_bias_samples_) {
-    sample.acquisition_epoch = bias_completion_epoch_;
-    callback_(sample);
-  }
+void FakeSession::stop_and_hold_port() noexcept {
+  ++stop_and_hold_port_calls_;
+  callback_ = {};
 }
 
 netft::HealthSnapshot FakeSession::health() const { return health_; }
 
-FakeBackend::FakeBackend() : session_(std::make_shared<FakeSession>()) {}
+FakeBackend::FakeBackend()
+    : session_(std::make_shared<FakeSession>()),
+      biased_session_(std::make_shared<FakeSession>(true)),
+      preview_alive_(std::make_shared<bool>(false)) {}
 
 netft::SensorConfiguration FakeBackend::discover(const ConnectionOptions &options) {
   discover_options_.push_back(options);
@@ -71,7 +84,18 @@ std::unique_ptr<SensorSession> FakeBackend::open(const ConnectionOptions &option
   if (fail_open_) {
     throw std::runtime_error("fake open failure");
   }
-  return std::make_unique<SharedSession>(session_);
+  return std::make_unique<SharedSession>(session_, preview_alive_);
+}
+
+std::unique_ptr<SensorSession> FakeBackend::open_biased(const ConnectionOptions &options) {
+  open_options_.push_back(options);
+  if (fail_open_) {
+    throw std::runtime_error("fake open failure");
+  }
+  preview_alive_at_biased_connect_ = *preview_alive_;
+  biased_session_->set_before_first_sample(
+      [this] { preview_alive_at_biased_first_sample_ = *preview_alive_; });
+  return std::make_unique<SharedSession>(biased_session_);
 }
 
 } // namespace netft_cli::test

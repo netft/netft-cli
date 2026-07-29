@@ -47,6 +47,15 @@ std::unique_ptr<SensorSession> open_session(const BiasOptions &options, SensorBa
   }
 }
 
+std::unique_ptr<SensorSession> open_biased_session(const BiasOptions &options,
+                                                   SensorBackend &backend) {
+  try {
+    return backend.open_biased(options.connection);
+  } catch (const std::exception &) {
+    throw AppError{ExitCode::Stream, "sensor bias stream could not be opened"};
+  }
+}
+
 class SessionStop {
 public:
   explicit SessionStop(SensorSession &session) noexcept : session_(session) {}
@@ -79,8 +88,6 @@ void require_healthy(const netft::HealthSnapshot &health) {
 
 int interrupted_status() { return static_cast<int>(ExitCode::Interrupted); }
 
-enum class BiasPhase { Before, Sending, After };
-
 } // namespace
 
 int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &output,
@@ -96,24 +103,12 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
       make_configuration_record(options.connection, discover(options, backend));
   LatestSampleSlot before_slot;
   LatestSampleSlot after_slot;
-  std::atomic<BiasPhase> phase{BiasPhase::Before};
-  std::atomic<std::uint32_t> preview_sequence{};
-  SensorSession::AcquisitionEpoch completion_epoch{};
   auto session = open_session(options, backend);
   SessionStop stop_session(*session);
   const auto origin = std::chrono::steady_clock::now();
 
   try {
-    session->start([&](const netft::Sample &sample) {
-      const auto current_phase = phase.load(std::memory_order_acquire);
-      if (current_phase == BiasPhase::After &&
-          sample.rdt_sequence != preview_sequence.load(std::memory_order_acquire) &&
-          sample.acquisition_epoch == completion_epoch) {
-        after_slot.publish(sample);
-      } else if (current_phase == BiasPhase::Before) {
-        before_slot.publish(sample);
-      }
-    });
+    session->start([&](const netft::Sample &sample) { before_slot.publish(sample); });
   } catch (const std::exception &) {
     throw AppError{ExitCode::Stream, "sensor stream could not be started"};
   }
@@ -157,25 +152,20 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
     return interrupted_status();
   }
 
-  preview_sequence.store(before_sample->rdt_sequence, std::memory_order_release);
-  phase.store(BiasPhase::Sending, std::memory_order_release);
+  session->stop_and_hold_port();
+  auto biased_session = open_biased_session(options, backend);
+  SessionStop stop_biased_session(*biased_session);
   try {
-    session->bias([&](const SensorSession::AcquisitionEpoch epoch) {
-      // The release-store publishes the causal receive epoch before the callback gate opens. A
-      // sample reads the epoch only after an acquire-load observes After.
-      completion_epoch = epoch;
-      phase.store(BiasPhase::After, std::memory_order_release);
-    });
+    biased_session->start([&](const netft::Sample &sample) { after_slot.publish(sample); });
   } catch (const std::exception &) {
-    throw AppError{ExitCode::Stream, "sensor bias command failed"};
+    throw AppError{ExitCode::Stream, "sensor bias stream could not be started"};
   }
-  require_healthy(read_health(*session));
 
   if (!after_slot.wait_for_first(options.connection.timeout, interrupt)) {
     if (interrupt.requested()) {
       return interrupted_status();
     }
-    require_healthy(read_health(*session));
+    require_healthy(read_health(*biased_session));
     throw AppError{ExitCode::Stream, "sensor stream produced no later sample before timeout"};
   }
 
@@ -183,7 +173,7 @@ int run_bias(const BiasOptions &options, SensorBackend &backend, OutputContext &
   if (!after_sample) {
     throw AppError{ExitCode::Stream, "sensor stream has no post-bias sample"};
   }
-  const auto after_health = read_health(*session);
+  const auto after_health = read_health(*biased_session);
   require_healthy(after_health);
   const BiasRecord result{preview.configuration, preview.sample,
                           make_sample_record(*after_sample, after_health, origin)};

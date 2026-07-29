@@ -230,7 +230,14 @@ std::thread Client::Impl::create_worker_thread() {
   return std::thread([this] { run(); });
 }
 
-void Client::Impl::stop() noexcept {
+void Client::Impl::stop() noexcept { stop_impl(false); }
+
+void Client::Impl::stop_and_hold_port() noexcept { stop_impl(true); }
+
+void Client::Impl::stop_impl(const bool hold_port) noexcept {
+  if (hold_port) {
+    hold_port_.store(true, std::memory_order_release);
+  }
   for (;;) {
     std::thread joining_worker;
     {
@@ -284,21 +291,6 @@ void Client::Impl::stop() noexcept {
     first_sample_cv_.notify_all();
     return;
   }
-}
-
-std::uint64_t Client::Impl::bias() {
-  std::scoped_lock command_lock(command_mutex_);
-  std::scoped_lock record_lock(record_mutex_);
-  {
-    std::scoped_lock data_lock(data_mutex_);
-    if (stopping_ || !session_started_ || faulted() || health_.state != ClientState::Streaming) {
-      throw NotConnectedError("client is not streaming");
-    }
-  }
-  transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
-  transport_.send(detail::encode_request(detail::Command::StartRealtime));
-  rdt_sequence_.reset();
-  return acquisition_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
 }
 
 bool Client::Impl::wait_for_first_sample(const std::chrono::duration<double> timeout) {
@@ -449,6 +441,9 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     if (stopping_) {
       return {SessionResult::Stopped, {}, false};
     }
+    if (config_.startup_mode == StartupMode::BiasAndStream) {
+      transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
+    }
     transport_.send(detail::encode_request(detail::Command::StartRealtime));
     session_started_ = true;
   } catch (const std::exception &error) {
@@ -476,9 +471,6 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     }
 
     std::size_t size{};
-    // Capture before entering the blocking receive. A receive that spans a successful bias
-    // therefore remains attributable to the old epoch even if decode and callback happen later.
-    const auto acquisition_epoch = acquisition_epoch_.load(std::memory_order_acquire);
     try {
       size = transport_.receive(buffer.data(), buffer.size(), deadline - now);
     } catch (const std::exception &error) {
@@ -516,7 +508,7 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     }
     received_valid_record = true;
     deadline = received_at + timeout;
-    if (const auto outcome = handle_record(record, received_at, acquisition_epoch)) {
+    if (const auto outcome = handle_record(record, received_at)) {
       return {*outcome, {}, received_valid_record};
     }
   }
@@ -525,8 +517,7 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
 
 std::optional<Client::Impl::SessionResult>
 Client::Impl::handle_record(const detail::RawRecord &record,
-                            const std::chrono::steady_clock::time_point received_at,
-                            const std::uint64_t acquisition_epoch) {
+                            const std::chrono::steady_clock::time_point received_at) {
   SensorConfiguration configuration;
   bool deliver = true;
   std::optional<SessionResult> outcome;
@@ -639,7 +630,6 @@ Client::Impl::handle_record(const detail::RawRecord &record,
   sample.force_unit = calibration.force_unit;
   sample.torque_unit = calibration.torque_unit;
   sample.configuration_revision = configuration.revision;
-  sample.acquisition_epoch = acquisition_epoch;
   sample.received_at = received_at;
 
   const auto callback_failure_outcome = [&] {
@@ -713,7 +703,9 @@ void Client::Impl::close_session() noexcept {
     }
     session_started_ = false;
   }
-  transport_.close();
+  if (!hold_port_.load(std::memory_order_acquire)) {
+    transport_.close();
+  }
 }
 
 void Client::Impl::finish_session() noexcept {

@@ -27,8 +27,9 @@ void prepare(test::FakeBackend &backend, std::uint32_t before,
              std::vector<netft::Sample> after = {}) {
   backend.set_configuration(test::configuration());
   backend.session().set_samples({test::sample(before)});
-  backend.session().set_post_bias_samples(std::move(after));
   backend.session().set_health(test::health());
+  backend.biased_session().set_samples(std::move(after));
+  backend.biased_session().set_health(test::health());
 }
 
 TEST(TerminalConfirmation, AcceptsAffirmativeAfterShowingRawAndScaledPreview) {
@@ -99,7 +100,7 @@ TEST(BiasCommand, DeclineDoesNotSendBias) {
   ASSERT_TRUE(confirmation.preview().has_value());
   EXPECT_EQ(confirmation.preview()->sample.rdt_sequence, 10U);
   EXPECT_EQ(confirmation.preview()->configuration.product_name, "ATI Mini45");
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
@@ -116,7 +117,7 @@ TEST(BiasCommand, NonTerminalInputWithoutYesDoesNotPromptOrSendBias) {
   });
 
   EXPECT_EQ(confirmation.calls(), 0U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
@@ -133,7 +134,7 @@ TEST(BiasCommand, InterruptedConfirmationDoesNotSendBias) {
             static_cast<int>(ExitCode::Interrupted));
 
   EXPECT_EQ(confirmation.calls(), 1U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
@@ -150,14 +151,14 @@ TEST(BiasCommand, InterruptedLineReadReturnsWithoutInputAndDoesNotSendBias) {
             static_cast<int>(ExitCode::Interrupted));
 
   EXPECT_EQ(reader.calls(), 1U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
 
-TEST(BiasCommand, YesSkipsPromptAndRequiresLaterSequence) {
+TEST(BiasCommand, YesSkipsPromptAndAcceptsFirstFreshSample) {
   test::FakeBackend backend;
-  prepare(backend, 10, {test::sample(10), test::sample(11)});
+  prepare(backend, 10, {test::sample(10)});
   test::MemoryOutput output(false);
   InterruptFlag interrupt;
   test::FakeConfirmation confirmation(false);
@@ -166,17 +167,17 @@ TEST(BiasCommand, YesSkipsPromptAndRequiresLaterSequence) {
             0);
 
   EXPECT_EQ(confirmation.calls(), 0U);
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 1U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   const auto document = test::parse_json(output.standard_output_text());
   EXPECT_EQ(document.at("configuration").at("product_name"), "ATI Mini45");
   EXPECT_EQ(document.at("before").at("rdt_sequence"), 10U);
-  EXPECT_EQ(document.at("after").at("rdt_sequence"), 11U);
+  EXPECT_EQ(document.at("after").at("rdt_sequence"), 10U);
 }
 
-TEST(BiasCommand, SamePostBiasSequenceTimesOutWithoutOutput) {
+TEST(BiasCommand, NoFreshSessionSampleTimesOutWithoutOutput) {
   test::FakeBackend backend;
-  prepare(backend, 10, {test::sample(10)});
+  prepare(backend, 10);
   auto options = test::bias_options(true);
   options.connection.timeout = 1ms;
   test::MemoryOutput output(false);
@@ -187,111 +188,15 @@ TEST(BiasCommand, SamePostBiasSequenceTimesOutWithoutOutput) {
     run_bias(options, backend, output.context(), confirmation, interrupt);
   });
 
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 1U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
 
-TEST(BiasCommand, CallbackWhileBiasCommandIsInProgressIsNotAcceptedAsPostBias) {
+TEST(BiasCommand, OldPreviewBacklogNeverEntersFreshSession) {
   test::FakeBackend backend;
-  prepare(backend, 10);
-  backend.session().set_during_bias_samples({test::sample(11)});
-  auto options = test::bias_options(true);
-  options.connection.timeout = 1ms;
-  test::MemoryOutput output(false);
-  InterruptFlag interrupt;
-  test::FakeConfirmation confirmation(false);
-
-  test::expect_app_error(ExitCode::Stream, [&] {
-    run_bias(options, backend, output.context(), confirmation, interrupt);
-  });
-
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
-  EXPECT_EQ(backend.session().stop_calls(), 1U);
-  EXPECT_TRUE(output.standard_output_text().empty());
-}
-
-TEST(BiasCommand, FirstSampleFromNewAcquisitionEpochIsAccepted) {
-  test::FakeBackend backend;
-  prepare(backend, 10);
-  auto fresh = test::sample(11);
-  fresh.acquisition_epoch = 1;
-  backend.session().set_completion_boundary_samples({fresh});
-  auto options = test::bias_options(true);
-  options.connection.timeout = 1ms;
-  test::MemoryOutput output(false);
-  InterruptFlag interrupt;
-  test::FakeConfirmation confirmation(false);
-
-  EXPECT_EQ(run_bias(options, backend, output.context(), confirmation, interrupt), 0);
-
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
-  EXPECT_EQ(backend.session().stop_calls(), 1U);
-  const auto document = test::parse_json(output.standard_output_text());
-  EXPECT_EQ(document.at("before").at("rdt_sequence"), 10U);
-  EXPECT_EQ(document.at("after").at("rdt_sequence"), 11U);
-}
-
-TEST(BiasCommand, SameTickPreBiasCallbackDoesNotProduceSuccess) {
-  test::FakeBackend backend;
-  prepare(backend, 10);
-  const auto boundary = std::chrono::steady_clock::time_point{3s};
-  auto stale = test::sample(11);
-  stale.received_at = boundary;
-  stale.acquisition_epoch = 0;
-  backend.session().set_bias_completion_epoch(1);
-  backend.session().set_completion_boundary_samples({stale});
-  auto options = test::bias_options(true);
-  options.connection.timeout = 1ms;
-  test::MemoryOutput output(false);
-  InterruptFlag interrupt;
-  test::FakeConfirmation confirmation(false);
-
-  test::expect_app_error(ExitCode::Stream, [&] {
-    run_bias(options, backend, output.context(), confirmation, interrupt);
-  });
-
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
-  EXPECT_EQ(backend.session().stop_calls(), 1U);
-  EXPECT_TRUE(output.standard_output_text().empty());
-}
-
-TEST(BiasCommand, ReceiveStartedBeforeBiasIsRejectedEvenWhenTimestampAndCallbackAreLater) {
-  test::FakeBackend backend;
-  prepare(backend, 10);
-  const auto boundary = std::chrono::steady_clock::time_point{3s};
-  auto stale = test::sample(11);
-  stale.received_at = boundary + 1s;
-  stale.acquisition_epoch = 0;
-  backend.session().set_bias_completion_epoch(1);
-  backend.session().set_completion_boundary_samples({stale});
-  auto options = test::bias_options(true);
-  options.connection.timeout = 1ms;
-  test::MemoryOutput output(false);
-  InterruptFlag interrupt;
-  test::FakeConfirmation confirmation(false);
-
-  test::expect_app_error(ExitCode::Stream, [&] {
-    run_bias(options, backend, output.context(), confirmation, interrupt);
-  });
-
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
-  EXPECT_EQ(backend.session().stop_calls(), 1U);
-  EXPECT_TRUE(output.standard_output_text().empty());
-}
-
-TEST(BiasCommand, OldInFlightReceiveIsIgnoredBeforeFirstNewEpochSample) {
-  test::FakeBackend backend;
-  prepare(backend, 10);
-  const auto boundary = std::chrono::steady_clock::time_point{3s};
-  auto stale = test::sample(11);
-  stale.received_at = boundary + 1s;
-  stale.acquisition_epoch = 0;
-  auto fresh = test::sample(12);
-  fresh.received_at = boundary + 2s;
-  fresh.acquisition_epoch = 1;
-  backend.session().set_bias_completion_epoch(1);
-  backend.session().set_completion_boundary_samples({stale, fresh});
+  prepare(backend, 10, {test::sample(11)});
+  backend.session().set_held_backlog({test::sample(99)});
   test::MemoryOutput output(false);
   InterruptFlag interrupt;
   test::FakeConfirmation confirmation(false);
@@ -300,10 +205,69 @@ TEST(BiasCommand, OldInFlightReceiveIsIgnoredBeforeFirstNewEpochSample) {
             0);
 
   const auto document = test::parse_json(output.standard_output_text());
-  EXPECT_EQ(document.at("before").at("rdt_sequence"), 10U);
-  EXPECT_EQ(document.at("after").at("rdt_sequence"), 12U);
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
-  EXPECT_EQ(backend.session().stop_calls(), 1U);
+  EXPECT_EQ(document.at("after").at("rdt_sequence"), 11U);
+  EXPECT_EQ(backend.session().held_backlog_count(), 1U);
+}
+
+TEST(BiasCommand, FreshSessionSendsBiasAndStartBeforeFirstReceive) {
+  test::FakeBackend backend;
+  prepare(backend, 10, {test::sample(11)});
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  EXPECT_EQ(run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt),
+            0);
+
+  EXPECT_EQ(backend.biased_session().startup_events(),
+            (std::vector<std::string>{"bias", "start", "receive"}));
+}
+
+TEST(BiasCommand, FailedStartAfterBiasDoesNotReceiveOrWriteOutput) {
+  test::FakeBackend backend;
+  prepare(backend, 10, {test::sample(11)});
+  backend.biased_session().fail_start_after_bias();
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  test::expect_app_error(ExitCode::Stream, [&] {
+    run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt);
+  });
+
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 1U);
+  EXPECT_EQ(backend.biased_session().start_send_calls(), 1U);
+  EXPECT_EQ(backend.biased_session().receive_calls(), 0U);
+  EXPECT_TRUE(output.standard_output_text().empty());
+}
+
+TEST(BiasCommand, FirstFreshSessionSampleIsAcceptedEvenWithPreviewSequence) {
+  test::FakeBackend backend;
+  prepare(backend, 10, {test::sample(10)});
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  EXPECT_EQ(run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt),
+            0);
+
+  const auto document = test::parse_json(output.standard_output_text());
+  EXPECT_EQ(document.at("after").at("rdt_sequence"), 10U);
+}
+
+TEST(BiasCommand, PreviewSessionHoldsPortAndStaysAliveThroughFreshFirstSample) {
+  test::FakeBackend backend;
+  prepare(backend, 10, {test::sample(11)});
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  EXPECT_EQ(run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt),
+            0);
+
+  EXPECT_EQ(backend.session().stop_and_hold_port_calls(), 1U);
+  EXPECT_TRUE(backend.preview_alive_at_biased_connect());
+  EXPECT_TRUE(backend.preview_alive_at_biased_first_sample());
 }
 
 TEST(BiasCommand, NoPreBiasSampleDoesNotSendBias) {
@@ -320,7 +284,7 @@ TEST(BiasCommand, NoPreBiasSampleDoesNotSendBias) {
     run_bias(options, backend, output.context(), confirmation, interrupt);
   });
 
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
@@ -341,7 +305,7 @@ TEST(BiasCommand, SeriousSensorFaultDoesNotPromptOrSendBias) {
   });
 
   EXPECT_EQ(confirmation.calls(), 0U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
@@ -349,7 +313,7 @@ TEST(BiasCommand, SeriousSensorFaultDoesNotPromptOrSendBias) {
 TEST(BiasCommand, BiasFailureMapsToStreamAndStopsWithoutOutput) {
   test::FakeBackend backend;
   prepare(backend, 10);
-  backend.session().fail_bias();
+  backend.biased_session().fail_start_after_bias();
   test::MemoryOutput output(false);
   InterruptFlag interrupt;
   test::FakeConfirmation confirmation(false);
@@ -358,7 +322,7 @@ TEST(BiasCommand, BiasFailureMapsToStreamAndStopsWithoutOutput) {
     run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt);
   });
 
-  EXPECT_EQ(backend.session().bias_calls(), 1U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 1U);
   EXPECT_EQ(backend.session().stop_calls(), 1U);
   EXPECT_TRUE(output.standard_output_text().empty());
 }
@@ -394,7 +358,7 @@ TEST(BiasCommand, RejectsUnsupportedFormatBeforeOutputOrNetwork) {
 
   EXPECT_EQ(backend.discover_calls(), 0U);
   EXPECT_EQ(backend.open_calls(), 0U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
 }
 
 TEST(BiasCommand, OpensOutputBeforeContactingSensor) {
@@ -411,7 +375,7 @@ TEST(BiasCommand, OpensOutputBeforeContactingSensor) {
 
   EXPECT_EQ(backend.discover_calls(), 0U);
   EXPECT_EQ(backend.open_calls(), 0U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
 }
 
 TEST(BiasCommand, RejectsFailedStandardOutputBeforeContactingSensor) {
@@ -430,7 +394,7 @@ TEST(BiasCommand, RejectsFailedStandardOutputBeforeContactingSensor) {
 
   EXPECT_EQ(backend.discover_calls(), 0U);
   EXPECT_EQ(backend.open_calls(), 0U);
-  EXPECT_EQ(backend.session().bias_calls(), 0U);
+  EXPECT_EQ(backend.biased_session().bias_send_calls(), 0U);
 }
 
 } // namespace

@@ -19,7 +19,8 @@ netft::DiscoveryOptions discovery_options(const ConnectionOptions &options) {
   return result;
 }
 
-netft::Config client_config(const ConnectionOptions &options) {
+netft::Config client_config(const ConnectionOptions &options,
+                            const netft::StartupMode startup_mode = netft::StartupMode::Stream) {
   netft::Config result;
   result.sensor_host = options.host;
   result.http_port = options.http_port;
@@ -28,6 +29,7 @@ netft::Config client_config(const ConnectionOptions &options) {
   result.configuration_connect_timeout = options.timeout;
   result.configuration_timeout = options.timeout;
   result.calibration_override.reset();
+  result.startup_mode = startup_mode;
   return result;
 }
 
@@ -42,10 +44,7 @@ public:
     });
   }
   void stop() noexcept override { client_.stop(); }
-  void bias(BiasCompletion on_command_complete) override {
-    std::scoped_lock lock(callback_gate_);
-    on_command_complete(client_.bias());
-  }
+  void stop_and_hold_port() noexcept override { client_.stop_and_hold_port(); }
   netft::HealthSnapshot health() const override { return client_.health(); }
 
 private:
@@ -61,6 +60,10 @@ netft::SensorConfiguration NetftBackend::discover(const ConnectionOptions &optio
 
 std::unique_ptr<SensorSession> NetftBackend::open(const ConnectionOptions &options) {
   return std::make_unique<NetftSession>(client_config(options));
+}
+
+std::unique_ptr<SensorSession> NetftBackend::open_biased(const ConnectionOptions &options) {
+  return std::make_unique<NetftSession>(client_config(options, netft::StartupMode::BiasAndStream));
 }
 
 } // namespace netft_cli

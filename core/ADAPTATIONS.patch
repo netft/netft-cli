@@ -1,57 +1,72 @@
 diff --git a/include/netft/client.hpp b/include/netft/client.hpp
-index 4a24373..cbb5d97 100644
+index 4a24373..eb32b18 100644
 --- a/include/netft/client.hpp
 +++ b/include/netft/client.hpp
 @@ -32 +32,2 @@ public:
 -  void bias();
-+  // Returns the new acquisition epoch after both bias commands have been sent successfully.
-+  std::uint64_t bias();
++  // Stops delivery while retaining the bound UDP socket until destruction.
++  void stop_and_hold_port() noexcept;
 diff --git a/include/netft/types.hpp b/include/netft/types.hpp
-index feb6365..b8e707f 100644
+index feb6365..2bd37fe 100644
 --- a/include/netft/types.hpp
 +++ b/include/netft/types.hpp
-@@ -74,0 +75,2 @@ struct Sample {
-+  // Epoch captured immediately before the receive attempt that produced this sample.
-+  std::uint64_t acquisition_epoch{};
+@@ -25,0 +26 @@ enum class RecoveryPolicy { Reconnect, FailStop };
++enum class StartupMode { Stream, BiasAndStream };
+@@ -64,0 +66 @@ struct Config {
++  StartupMode startup_mode{StartupMode::Stream};
 diff --git a/src/client.cpp b/src/client.cpp
-index e253b28..9dfefca 100644
+index e253b28..acec923 100644
 --- a/src/client.cpp
 +++ b/src/client.cpp
 @@ -17 +17 @@ void Client::stop() noexcept { impl_->stop(); }
 -void Client::bias() { impl_->bias(); }
-+std::uint64_t Client::bias() { return impl_->bias(); }
++void Client::stop_and_hold_port() noexcept { impl_->stop_and_hold_port(); }
 diff --git a/src/detail/client_impl.cpp b/src/detail/client_impl.cpp
-index 1314d43..f175690 100644
+index 1314d43..e6f77fb 100644
 --- a/src/detail/client_impl.cpp
 +++ b/src/detail/client_impl.cpp
-@@ -289 +289 @@ void Client::Impl::stop() noexcept {
+@@ -233 +233,8 @@ std::thread Client::Impl::create_worker_thread() {
+-void Client::Impl::stop() noexcept {
++void Client::Impl::stop() noexcept { stop_impl(false); }
++
++void Client::Impl::stop_and_hold_port() noexcept { stop_impl(true); }
++
++void Client::Impl::stop_impl(const bool hold_port) noexcept {
++  if (hold_port) {
++    hold_port_.store(true, std::memory_order_release);
++  }
+@@ -289,14 +295,0 @@ void Client::Impl::stop() noexcept {
 -void Client::Impl::bias() {
-+std::uint64_t Client::Impl::bias() {
-@@ -300,0 +301 @@ void Client::Impl::bias() {
-+  return acquisition_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
-@@ -477,0 +479,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
-+    // Capture before entering the blocking receive. A receive that spans a successful bias
-+    // therefore remains attributable to the old epoch even if decode and callback happen later.
-+    const auto acquisition_epoch = acquisition_epoch_.load(std::memory_order_acquire);
-@@ -515 +519 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
--    if (const auto outcome = handle_record(record, received_at)) {
-+    if (const auto outcome = handle_record(record, received_at, acquisition_epoch)) {
-@@ -524 +528,2 @@ Client::Impl::handle_record(const detail::RawRecord &record,
--                            const std::chrono::steady_clock::time_point received_at) {
-+                            const std::chrono::steady_clock::time_point received_at,
-+                            const std::uint64_t acquisition_epoch) {
-@@ -636,0 +642 @@ Client::Impl::handle_record(const detail::RawRecord &record,
-+  sample.acquisition_epoch = acquisition_epoch;
+-  std::scoped_lock command_lock(command_mutex_);
+-  std::scoped_lock record_lock(record_mutex_);
+-  {
+-    std::scoped_lock data_lock(data_mutex_);
+-    if (stopping_ || !session_started_ || faulted() || health_.state != ClientState::Streaming) {
+-      throw NotConnectedError("client is not streaming");
+-    }
+-  }
+-  transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
+-  transport_.send(detail::encode_request(detail::Command::StartRealtime));
+-  rdt_sequence_.reset();
+-}
+-
+@@ -450,0 +444,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
++    if (config_.startup_mode == StartupMode::BiasAndStream) {
++      transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
++    }
+@@ -710 +706,3 @@ void Client::Impl::close_session() noexcept {
+-  transport_.close();
++  if (!hold_port_.load(std::memory_order_acquire)) {
++    transport_.close();
++  }
 diff --git a/src/detail/client_impl.hpp b/src/detail/client_impl.hpp
-index 512ea21..ba88b32 100644
+index 512ea21..5131559 100644
 --- a/src/detail/client_impl.hpp
 +++ b/src/detail/client_impl.hpp
 @@ -27 +27 @@ public:
 -  void bias();
-+  std::uint64_t bias();
-@@ -61 +61,2 @@ private:
--                                             std::chrono::steady_clock::time_point received_at);
-+                                             std::chrono::steady_clock::time_point received_at,
-+                                             std::uint64_t acquisition_epoch);
-@@ -91,0 +93 @@ private:
-+  std::atomic<std::uint64_t> acquisition_epoch_{};
++  void stop_and_hold_port() noexcept;
+@@ -61,0 +62 @@ private:
++  void stop_impl(bool hold_port) noexcept;
+@@ -92,0 +94 @@ private:
++  std::atomic<bool> hold_port_{false};

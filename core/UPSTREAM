@@ -4,4 +4,4 @@ commit=46ee05639f818a17c1cfe604d0d77b1feb8f9b2b
 paths=LICENSE,include,src
 adaptation_path=ADAPTATIONS.patch
 adaptation_format=git-diff-unified-zero
-adaptation_sha256=565b1e600803c6ea7cbf0094c9c1d5dd5ded1ce933ea0258fe79701218e27aa8
+adaptation_sha256=d441ca65cb4f91689fda8a45dec5e2fd1f57ea22ae3b5e603ab639c436b9b36a

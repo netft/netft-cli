@@ -23,6 +23,7 @@ enum class TorqueUnit {
 };
 enum class CalibrationSource { Sensor, Override };
 enum class RecoveryPolicy { Reconnect, FailStop };
+enum class StartupMode { Stream, BiasAndStream };
 enum class ClientState { Stopped, Connecting, Streaming, Backoff, Faulted };
 enum class FaultCode {
   None,
@@ -62,6 +63,7 @@ struct Config {
   double sample_rate_limit_hz{0.0};
   bool deliver_samples_with_error_status{false};
   RecoveryPolicy recovery_policy{RecoveryPolicy::Reconnect};
+  StartupMode startup_mode{StartupMode::Stream};
   std::optional<Calibration> calibration_override;
 };
 
@@ -72,8 +74,6 @@ struct Sample {
   ForceUnit force_unit{ForceUnit::Unknown};
   TorqueUnit torque_unit{TorqueUnit::Unknown};
   std::uint64_t configuration_revision{};
-  // Epoch captured immediately before the receive attempt that produced this sample.
-  std::uint64_t acquisition_epoch{};
   std::chrono::steady_clock::time_point received_at;
 };
 
