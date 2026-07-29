@@ -19,8 +19,24 @@ target_link_libraries(netft PRIVATE netft_core)
 netft_enable_warnings(netft)
 netft_enable_sanitizers(netft)
 
+add_library(netft_cli_options src/cli/options.cpp)
+target_compile_features(netft_cli_options PUBLIC cxx_std_17)
+target_include_directories(netft_cli_options PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+netft_enable_warnings(netft_cli_options)
+netft_enable_sanitizers(netft_cli_options)
+
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  find_package(GTest REQUIRED)
+
+  add_executable(netft_options_test test/unit/options_test.cpp)
+  target_compile_features(netft_options_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_options_test PRIVATE netft_cli_options GTest::gtest_main)
+  netft_enable_warnings(netft_options_test)
+  netft_enable_sanitizers(netft_options_test)
+
+  add_test(NAME netft_options COMMAND netft_options_test)
+
   add_test(
     NAME sync_core
     COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test/tools/test_sync_core.py" -q
