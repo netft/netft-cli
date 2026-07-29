@@ -83,17 +83,23 @@ class FakeSensor:
         self._http_status = 200
         self._http_delay = 0.0
 
-        self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._udp.bind((self.host, rdt_port))
-        self._udp.settimeout(0.01)
-        self.rdt_port = self._udp.getsockname()[1]
-
-        self._http = _HttpServer((self.host, http_port), _ConfigurationHandler)
-        self._http.sensor = self  # type: ignore[attr-defined]
-        self.http_port = self._http.server_address[1]
-        self._udp_thread = threading.Thread(target=self._run_udp, daemon=True)
-        self._http_thread = threading.Thread(target=self._http.serve_forever, daemon=True)
+        self._udp: socket.socket | None = None
+        self._http: _HttpServer | None = None
+        self._udp_thread: threading.Thread | None = None
+        self._http_thread: threading.Thread | None = None
         try:
+            self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._udp.bind((self.host, rdt_port))
+            self._udp.settimeout(0.01)
+            self.rdt_port = self._udp.getsockname()[1]
+
+            self._http = _HttpServer((self.host, http_port), _ConfigurationHandler)
+            self._http.sensor = self  # type: ignore[attr-defined]
+            self.http_port = self._http.server_address[1]
+            self._udp_thread = threading.Thread(target=self._run_udp, daemon=True)
+            self._http_thread = threading.Thread(
+                target=self._http.serve_forever, daemon=True
+            )
             self._udp_thread.start()
             self._http_thread.start()
         except BaseException:
@@ -115,13 +121,19 @@ class FakeSensor:
     def _close_resources(self) -> None:
         self._closed = True
         self._stop.set()
-        if self._http_thread.is_alive():
+        if (
+            self._http is not None
+            and self._http_thread is not None
+            and self._http_thread.is_alive()
+        ):
             self._http.shutdown()
-        self._http.server_close()
-        self._udp.close()
-        if self._udp_thread.is_alive():
+        if self._http is not None:
+            self._http.server_close()
+        if self._udp is not None:
+            self._udp.close()
+        if self._udp_thread is not None and self._udp_thread.is_alive():
             self._udp_thread.join(timeout=2.0)
-        if self._http_thread.is_alive():
+        if self._http_thread is not None and self._http_thread.is_alive():
             self._http_thread.join(timeout=2.0)
 
     @property

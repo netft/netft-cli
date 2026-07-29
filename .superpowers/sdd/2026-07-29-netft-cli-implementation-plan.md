@@ -145,7 +145,7 @@ Run:
 
 ```bash
 python tools/sync_core.py sync \
-  --source /home/sustechdl/Documents/netft-cpp \
+  --source <path-to-netft-cpp> \
   --tag v0.3.0
 python tools/sync_core.py verify
 ```

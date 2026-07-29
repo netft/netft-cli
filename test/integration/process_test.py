@@ -13,6 +13,7 @@ from contextlib import contextmanager
 
 import pytest
 
+import run_fake_sensor
 from run_fake_sensor import FakeSensor
 
 
@@ -119,28 +120,87 @@ def test_unwritable_output_is_io_error(tmp_path: Path) -> None:
     assert "io" in result.stderr.splitlines()[0]
 
 
-def test_fake_sensor_cleans_up_if_second_thread_cannot_start(
+def tracked_sockets(monkeypatch: pytest.MonkeyPatch) -> list[socket.socket]:
+    original_socket = socket.socket
+    resources: list[socket.socket] = []
+
+    def create_socket(*args: object, **kwargs: object) -> socket.socket:
+        resource = original_socket(*args, **kwargs)
+        resources.append(resource)
+        return resource
+
+    monkeypatch.setattr(run_fake_sensor.socket, "socket", create_socket)
+    return resources
+
+
+def test_fake_sensor_cleans_up_if_http_server_construction_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_start = threading.Thread.start
-    started_threads: list[threading.Thread] = []
-    call_count = 0
+    sockets = tracked_sockets(monkeypatch)
 
-    def fail_second_start(thread: threading.Thread) -> None:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            raise RuntimeError("injected thread startup failure")
-        original_start(thread)
-        started_threads.append(thread)
+    def fail_http_server(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError("injected HTTP server construction failure")
 
-    monkeypatch.setattr(threading.Thread, "start", fail_second_start)
+    monkeypatch.setattr(run_fake_sensor, "_HttpServer", fail_http_server)
     with pytest.raises(RuntimeError):
         FakeSensor()
 
-    assert len(started_threads) == 1
-    started_threads[0].join(timeout=1.0)
-    assert not started_threads[0].is_alive()
+    assert sockets
+    assert all(resource.fileno() == -1 for resource in sockets)
+
+
+def test_fake_sensor_cleans_up_if_thread_construction_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sockets = tracked_sockets(monkeypatch)
+    original_thread = threading.Thread
+    construction_count = 0
+
+    def construct_thread(*args: object, **kwargs: object) -> threading.Thread:
+        nonlocal construction_count
+        construction_count += 1
+        if construction_count == 2:
+            raise RuntimeError("injected thread construction failure")
+        return original_thread(*args, **kwargs)
+
+    monkeypatch.setattr(run_fake_sensor.threading, "Thread", construct_thread)
+    with pytest.raises(RuntimeError):
+        FakeSensor()
+
+    assert construction_count == 2
+    assert sockets
+    assert all(resource.fileno() == -1 for resource in sockets)
+
+
+@pytest.mark.parametrize("failed_start", [1, 2])
+def test_fake_sensor_cleans_up_if_thread_start_fails(
+    monkeypatch: pytest.MonkeyPatch, failed_start: int
+) -> None:
+    sockets = tracked_sockets(monkeypatch)
+    original_start = threading.Thread.start
+    threads: list[threading.Thread] = []
+    start_count = 0
+
+    def start_thread(thread: threading.Thread) -> None:
+        nonlocal start_count
+        start_count += 1
+        threads.append(thread)
+        if start_count == failed_start:
+            raise RuntimeError("injected thread startup failure")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start_thread)
+    with pytest.raises(RuntimeError):
+        FakeSensor()
+
+    assert start_count == failed_start
+    assert sockets
+    assert all(resource.fileno() == -1 for resource in sockets)
+    for thread in threads:
+        if thread.ident is not None:
+            thread.join(timeout=1.0)
+        assert not thread.is_alive()
 
 
 def test_monitor_writes_parseable_ndjson_to_stdout_only() -> None:

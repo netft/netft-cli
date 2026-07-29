@@ -241,4 +241,12 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/test/integration/process_test.py" -q
   )
   set_tests_properties(netft_cli_process PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  add_test(
+    NAME netft_platform_scripts
+    COMMAND "${Python3_EXECUTABLE}" -m pytest
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/platform/platform_scripts_test.py" -q
+  )
+  set_tests_properties(netft_platform_scripts
+                       PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
