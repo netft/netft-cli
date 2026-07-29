@@ -211,7 +211,7 @@ Clock::TimePoint checked_add(Clock::TimePoint origin, Clock::Duration duration,
 Clock::TimePoint first_deadline_after(Clock::TimePoint origin, Clock::Duration period,
                                       Clock::TimePoint time) {
   if (time < origin) {
-    return *try_add(origin, period);
+    return checked_add(origin, period, "rate");
   }
   const Tick origin_ticks = origin.time_since_epoch().count();
   const Tick time_ticks = time.time_since_epoch().count();
