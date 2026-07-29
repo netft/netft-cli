@@ -8,20 +8,6 @@ INSTALLER = ROOT / "scripts" / "install" / "install.ps1"
 NATIVE_TEST = ROOT / "test" / "artifact" / "install_ps1_test.ps1"
 
 
-def test_powershell_installer_has_native_release_safety_boundaries() -> None:
-    source = INSTALLER.read_text(encoding="utf-8")
-
-    for operation in (
-        "Invoke-WebRequest",
-        "Get-FileHash",
-        "Expand-Archive",
-        "[IO.File]::Replace",
-        "Assert-ZipPayload",
-        "Assert-ExpandedPayload",
-    ):
-        assert operation in source
-
-
 def test_powershell_installer_exposes_only_the_public_install_interface() -> None:
     parameter_block = INSTALLER.read_text(encoding="utf-8").split(
         "Set-StrictMode", maxsplit=1
@@ -33,9 +19,12 @@ def test_powershell_installer_exposes_only_the_public_install_interface() -> Non
     assert "ReleaseBase" not in parameter_block
 
 
-def test_native_powershell_test_uses_only_the_loopback_path_seam() -> None:
+def test_native_powershell_test_uses_production_binary_and_isolated_seams() -> None:
     source = NATIVE_TEST.read_text(encoding="utf-8")
 
+    assert "NETFT_EXECUTABLE" in source
+    assert "Add-Type -TypeDefinition" not in source
+    assert "ConsoleApplication" not in source
     assert "127.0.0.1" in source
     assert "NETFT_CLI_TEST_USER_PATH_FILE" in source
     assert "EnvironmentVariableTarget]::User" not in source

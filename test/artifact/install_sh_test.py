@@ -9,6 +9,7 @@ import subprocess
 import tarfile
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
@@ -17,6 +18,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "scripts" / "install" / "install.sh"
+MAX_MEMBER_BYTES = 32 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class Redirect:
+    location: str
 
 
 def fake_binary(version: str) -> bytes:
@@ -30,6 +37,7 @@ def release_archive(
     extra_name: str | None = None,
     symlink: bool = False,
     traversal: bool = False,
+    oversized_license: bool = False,
 ) -> bytes:
     root = f"netft-cli-{version}"
     payload = [
@@ -42,6 +50,8 @@ def release_archive(
         payload.append((extra_name, b"unexpected"))
     if traversal:
         payload[0] = (f"{root}/../outside", b"outside")
+    if oversized_license:
+        payload[0] = (f"{root}/LICENSE", b"\0" * (MAX_MEMBER_BYTES + 1))
 
     destination = io.BytesIO()
     with tarfile.open(fileobj=destination, mode="w:gz") as archive:
@@ -69,7 +79,7 @@ def checksum_file(files: dict[str, bytes], extra_lines: list[str] | None = None)
 
 
 class FixtureServer(http.server.ThreadingHTTPServer):
-    files: dict[str, bytes]
+    files: dict[str, bytes | Redirect]
     requests: list[str]
 
 
@@ -79,6 +89,11 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         data = self.server.files.get(self.path)  # type: ignore[attr-defined]
         if data is None:
             self.send_error(404)
+            return
+        if isinstance(data, Redirect):
+            self.send_response(302)
+            self.send_header("Location", data.location)
+            self.end_headers()
             return
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
@@ -90,7 +105,9 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextmanager
-def release_server(files: dict[str, bytes]) -> Iterator[tuple[str, FixtureServer]]:
+def release_server(
+    files: dict[str, bytes | Redirect],
+) -> Iterator[tuple[str, FixtureServer]]:
     server = FixtureServer(("127.0.0.1", 0), FixtureHandler)
     server.files = files
     server.requests = []
@@ -163,7 +180,7 @@ def fake_uname(directory: Path, system: str, machine: str) -> Path:
 
 
 def run_installer(
-    base_url: str,
+    base_url: str | None,
     tmp_path: Path,
     *arguments: str,
     system: str = "Linux",
@@ -175,11 +192,14 @@ def run_installer(
     environment.update(
         {
             "HOME": str(tmp_path / "home"),
-            "NETFT_CLI_RELEASE_BASE_URL": base_url,
             "PATH": f"{tools}{os.pathsep}{path or os.environ['PATH']}",
             "LC_ALL": "C",
         }
     )
+    if base_url is None:
+        environment.pop("NETFT_CLI_RELEASE_BASE_URL", None)
+    else:
+        environment["NETFT_CLI_RELEASE_BASE_URL"] = base_url
     return subprocess.run(
         ["/bin/sh", str(INSTALLER), *arguments],
         env=environment,
@@ -441,6 +461,7 @@ def test_install_sh_supports_wget_when_curl_is_unavailable(tmp_path: Path) -> No
         "rm",
         "sha256sum",
         "tar",
+        "wc",
         "wget",
     ):
         executable = shutil.which(command)
@@ -512,3 +533,250 @@ def test_install_sh_refuses_symbolic_link_destination(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert installed.is_symlink()
     assert previous.read_bytes() == fake_binary("0.0.9")
+
+
+def test_install_sh_refuses_directory_destination(tmp_path: Path) -> None:
+    destination = tmp_path / "bin"
+    installed = destination / "netft"
+    installed.mkdir(parents=True)
+    marker = installed / "marker"
+    marker.write_text("preserve", encoding="utf-8")
+
+    with release_server(fixture_files()) as (base_url, _server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(destination),
+        )
+
+    assert result.returncode != 0
+    assert marker.read_text(encoding="utf-8") == "preserve"
+
+
+def test_install_sh_refuses_symlink_installation_directory(
+    tmp_path: Path,
+) -> None:
+    real_destination = tmp_path / "real-bin"
+    real_destination.mkdir()
+    destination = tmp_path / "bin"
+    destination.symlink_to(real_destination, target_is_directory=True)
+
+    with release_server(fixture_files()) as (base_url, server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(destination),
+        )
+
+    assert result.returncode != 0
+    assert server.requests == []
+    assert list(real_destination.iterdir()) == []
+
+
+def test_install_sh_does_not_remove_foreign_lock_symlink(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    foreign = tmp_path / "foreign-lock"
+    foreign.mkdir()
+    lock = destination / ".netft-install.lock"
+    lock.symlink_to(foreign, target_is_directory=True)
+
+    with release_server(fixture_files()) as (base_url, server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(destination),
+        )
+
+    assert result.returncode != 0
+    assert server.requests == []
+    assert lock.is_symlink()
+    assert foreign.is_dir()
+
+
+def test_install_sh_rejects_oversized_uninstalled_member_and_preserves_binary(
+    tmp_path: Path,
+) -> None:
+    archive = release_archive("0.1.0", oversized_license=True)
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    old = destination / "netft"
+    old.write_bytes(fake_binary("0.0.9"))
+    old.chmod(0o755)
+
+    with release_server(fixture_files(archive=archive)) as (base_url, _server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(destination),
+        )
+
+    assert result.returncode != 0
+    assert old.read_bytes() == fake_binary("0.0.9")
+
+
+def test_install_sh_lock_contention_preserves_previous_binary(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    (destination / ".netft-install.lock").mkdir()
+    old = destination / "netft"
+    old.write_bytes(fake_binary("0.0.9"))
+    old.chmod(0o755)
+
+    with release_server(fixture_files()) as (base_url, server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(destination),
+        )
+
+    assert result.returncode != 0
+    assert server.requests == []
+    assert old.read_bytes() == fake_binary("0.0.9")
+
+
+def test_release_base_override_rejects_https_before_creating_destination(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "bin"
+
+    result = run_installer(
+        "https://127.0.0.1:1/releases",
+        tmp_path,
+        "--version",
+        "0.1.0",
+        "--bin-dir",
+        str(destination),
+    )
+
+    assert result.returncode != 0
+    assert not destination.exists()
+
+
+def restricted_tool_path(directory: Path, *, include_wget: bool = True) -> Path:
+    directory.mkdir()
+    commands = [
+        "awk",
+        "chmod",
+        "cmp",
+        "grep",
+        "gzip",
+        "mkdir",
+        "mktemp",
+        "mv",
+        "rm",
+        "sha256sum",
+        "tar",
+        "wc",
+    ]
+    if include_wget:
+        commands.append("wget")
+    for command in commands:
+        executable = shutil.which(command)
+        assert executable is not None
+        (directory / command).symlink_to(executable)
+    return directory
+
+
+@pytest.mark.parametrize(
+    "location_template",
+    [
+        "http://localhost:{port}/escaped",
+        "http://127.0.0.2:{port}/escaped",
+        "http://[::1]:{port}/escaped",
+        "https://example.com/escaped",
+    ],
+)
+def test_wget_loopback_fixture_rejects_redirect_escape(
+    tmp_path: Path, location_template: str
+) -> None:
+    restricted = restricted_tool_path(tmp_path / "restricted")
+    files: dict[str, bytes | Redirect] = {}
+    with release_server(files) as (base_url, server):
+        port = server.server_address[1]
+        files["/releases/download/v0.1.0/SHA256SUMS"] = Redirect(
+            location_template.format(port=port)
+        )
+        files["/escaped"] = checksum_file(
+            release_inventory("0.1.0", "linux-x86_64", b"unused")
+        )
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(tmp_path / "bin"),
+            path=str(restricted),
+        )
+
+    assert result.returncode != 0
+    assert server.requests == ["/releases/download/v0.1.0/SHA256SUMS"]
+
+
+@pytest.mark.parametrize(
+    "redirect_location",
+    [
+        "http://example.test/release",
+        "https://user@example.com/release",
+        "https://example.com/release#fragment",
+        "https://example.com%2fevil.test/release",
+        "https://example.com/release\x01",
+    ],
+)
+def test_wget_production_rejects_unsafe_redirect_before_following(
+    tmp_path: Path, redirect_location: str
+) -> None:
+    restricted = restricted_tool_path(
+        tmp_path / "restricted",
+        include_wget=False,
+    )
+    marker = tmp_path / "followed-http"
+    wget = restricted / "wget"
+    wget.write_text(
+        "#!/bin/sh\n"
+        f"marker='{marker}'\n"
+        "for argument in \"$@\"; do\n"
+        "  if [ \"$argument\" = '--max-redirect=0' ]; then\n"
+        "    printf '  HTTP/1.1 302 Found\\n' >&2\n"
+        f"    printf '  Location: {redirect_location}\\n' >&2\n"
+        "    exit 8\n"
+        "  fi\n"
+        "done\n"
+        ": >\"$marker\"\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    wget.chmod(0o755)
+
+    result = run_installer(
+        None,
+        tmp_path,
+        "--version",
+        "0.1.0",
+        "--bin-dir",
+        str(tmp_path / "bin"),
+        path=str(restricted),
+    )
+
+    assert result.returncode != 0
+    assert not marker.exists()

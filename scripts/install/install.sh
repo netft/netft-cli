@@ -4,6 +4,11 @@ set -eu
 
 PROGRAM=netft
 DEFAULT_RELEASE_BASE_URL=https://github.com/netft/netft-cli/releases
+MAX_CHECKSUM_BYTES=1048576
+MAX_ARCHIVE_BYTES=67108864
+MAX_MEMBER_BYTES=33554432
+MAX_TOTAL_BYTES=50331648
+MAX_REDIRECTS=5
 
 die() {
   printf 'netft installer: %s\n' "$*" >&2
@@ -52,25 +57,160 @@ is_release_asset_name() {
 download() {
   url=$1
   output=$2
+  max_bytes=$3
+  validate_download_url "$url"
   if command -v curl >/dev/null 2>&1; then
-    if [ "$release_transport" = https ]; then
-      curl --fail --location --silent --show-error \
-        --proto '=https' --proto-redir '=https' --output "$output" "$url"
+    if [ "$release_transport" = production ]; then
+      if ! curl --fail --location --silent --show-error \
+        --proto '=https' --proto-redir '=https' --output "$output" "$url"; then
+        die "curl failed while downloading a release file"
+      fi
     else
-      curl --fail --silent --show-error \
-        --proto '=http' --output "$output" "$url"
+      if ! curl --fail --location --max-redirs 0 --silent --show-error \
+        --proto '=http' --proto-redir '=http' --output "$output" "$url"; then
+        die "curl failed while downloading a release file"
+      fi
     fi
+    assert_file_within_limit "$output" "$max_bytes"
     return
   fi
   if command -v wget >/dev/null 2>&1; then
-    if [ "$release_transport" = https ]; then
-      wget --https-only --quiet --output-document="$output" "$url"
-    else
-      wget --quiet --output-document="$output" "$url"
-    fi
+    download_with_wget "$url" "$output"
+    assert_file_within_limit "$output" "$max_bytes"
     return
   fi
   die "curl or wget is required"
+}
+
+validate_download_url() {
+  candidate_url=$1
+  if printf '%s' "$candidate_url" |
+    LC_ALL=C grep -q '[[:cntrl:][:space:]]'; then
+    die "release URL contains whitespace or control characters"
+  fi
+  case "$candidate_url" in
+    *'#'*) die "release URLs must not contain fragments" ;;
+  esac
+  if [ "$release_transport" = production ]; then
+    case "$candidate_url" in
+      https://*) ;;
+      *) die "release redirect must be an absolute HTTPS URL" ;;
+    esac
+    authority=${candidate_url#https://}
+    authority=${authority%%/*}
+    authority=${authority%%\?*}
+    case "$authority" in
+      '' | *@*) die "release URL authority is not accepted" ;;
+    esac
+    host_name=${authority%%:*}
+    if [ "$host_name" != "$authority" ]; then
+      port_number=${authority##*:}
+      case "$port_number" in
+        '' | *[!0-9]*) die "release URL port is not accepted" ;;
+      esac
+      [ "${#port_number}" -le 5 ] &&
+        [ "$port_number" -ge 1 ] &&
+        [ "$port_number" -le 65535 ] ||
+        die "release URL port is not accepted"
+    fi
+    printf '%s\n' "$host_name" |
+      grep -Eq '^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)(\.([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?))*$' ||
+      die "release URL host is not accepted"
+    return
+  fi
+  printf '%s\n' "$candidate_url" |
+    grep -Eq '^http://127\.0\.0\.1:[0-9]+(/[^[:space:]]*)?$' ||
+    die "release fixture redirect escaped exact loopback"
+  loopback_authority=${candidate_url#http://}
+  loopback_authority=${loopback_authority%%/*}
+  loopback_port=${loopback_authority##*:}
+  [ "${#loopback_port}" -le 5 ] &&
+    [ "$loopback_port" -ge 1 ] &&
+    [ "$loopback_port" -le 65535 ] ||
+    die "release fixture port is not accepted"
+}
+
+assert_file_within_limit() {
+  bounded_path=$1
+  bounded_limit=$2
+  [ -f "$bounded_path" ] || die "download did not produce a regular file"
+  bounded_size=$(wc -c <"$bounded_path") ||
+    die "unable to measure downloaded file"
+  case "$bounded_size" in
+    '' | *[!0-9]*) die "unable to measure downloaded file" ;;
+  esac
+  [ "$bounded_size" -le "$bounded_limit" ] ||
+    die "download exceeds the installer size limit"
+}
+
+download_with_wget() {
+  current_url=$1
+  final_output=$2
+  redirect_count=0
+  part_output=$final_output.part
+  header_output=$final_output.headers
+  while :; do
+    rm -f "$part_output" "$header_output"
+    if wget --server-response --max-redirect=0 \
+      --output-document="$part_output" "$current_url" 2>"$header_output"; then
+      wget_result=0
+    else
+      wget_result=$?
+    fi
+    response_status=$(
+      awk '
+        /^[[:space:]]*HTTP\/[0-9.]+ [0-9][0-9][0-9]/ { status = $2 }
+        END { print status }
+      ' "$header_output"
+    )
+    case "$response_status" in
+      2??)
+        [ "$wget_result" -eq 0 ] ||
+          die "wget failed while downloading a release file"
+        mv -f "$part_output" "$final_output" ||
+          die "unable to finalize downloaded file"
+        rm -f "$header_output"
+        return
+        ;;
+      301 | 302 | 303 | 307 | 308)
+        [ "$release_transport" = production ] ||
+          die "loopback release fixtures must not redirect"
+        [ "$redirect_count" -lt "$MAX_REDIRECTS" ] ||
+          die "release download exceeded the redirect limit"
+        if ! redirect_url=$(
+          awk '
+            BEGIN { IGNORECASE = 1 }
+            /^[[:space:]]*Location:/ {
+              sub(/^[[:space:]]*Location:[[:space:]]*/, "")
+              sub(/\r$/, "")
+              location = $0
+              count++
+            }
+            END {
+              if (count != 1) {
+                exit 2
+              }
+              print location
+            }
+          ' "$header_output"
+        ); then
+          die "release redirect must contain exactly one Location"
+        fi
+        case "$redirect_url" in
+          https://*) ;;
+          *)
+            die "relative or non-HTTPS release redirects are not accepted"
+            ;;
+        esac
+        validate_download_url "$redirect_url"
+        current_url=$redirect_url
+        redirect_count=$((redirect_count + 1))
+        ;;
+      *)
+        die "wget failed while downloading a release file"
+        ;;
+    esac
+  done
 }
 
 validate_checksum_inventory() {
@@ -199,14 +339,45 @@ validate_and_extract_archive() {
   [ "$member_types" = "$expected_types" ] ||
     die "release archive members must be regular files"
 
+  assert_file_within_limit "$archive_path" "$MAX_ARCHIVE_BYTES"
   mkdir "$extract_path"
-  if ! tar -xzf "$archive_path" -C "$extract_path" "$root/netft"; then
-    die "unable to extract release archive"
-  fi
-  candidate="$extract_path/$root/netft"
+  extracted_total=0
+  bounded_extract_member "$archive_path" "$root/LICENSE" \
+    "$extract_path/LICENSE"
+  bounded_extract_member "$archive_path" "$root/LICENSES/curl.txt" \
+    "$extract_path/curl.txt"
+  bounded_extract_member "$archive_path" "$root/LICENSES/netft-cpp.txt" \
+    "$extract_path/netft-cpp.txt"
+  bounded_extract_member "$archive_path" "$root/netft" \
+    "$extract_path/netft"
+  candidate="$extract_path/netft"
   [ -f "$candidate" ] && [ ! -L "$candidate" ] ||
     die "release archive did not produce a regular netft executable"
   chmod 0755 "$candidate"
+}
+
+bounded_extract_member() {
+  bounded_archive=$1
+  bounded_member=$2
+  bounded_output=$3
+  member_block_limit=$(((MAX_MEMBER_BYTES + 511) / 512))
+  rm -f "$bounded_output"
+  if ! (
+    ulimit -f "$member_block_limit" 2>/dev/null || exit 1
+    tar -xOzf "$bounded_archive" "$bounded_member" >"$bounded_output"
+  ); then
+    die "release archive member exceeds its limit or cannot be read"
+  fi
+  member_size=$(wc -c <"$bounded_output") ||
+    die "unable to measure extracted archive member"
+  case "$member_size" in
+    '' | *[!0-9]*) die "unable to measure extracted archive member" ;;
+  esac
+  [ "$member_size" -le "$MAX_MEMBER_BYTES" ] ||
+    die "release archive member exceeds its size limit"
+  extracted_total=$((extracted_total + member_size))
+  [ "$extracted_total" -le "$MAX_TOTAL_BYTES" ] ||
+    die "release archive exceeds its expanded size limit"
 }
 
 version_argument=
@@ -245,33 +416,55 @@ fi
 [ -n "$bin_dir" ] || die "installation directory must not be empty"
 
 target=$(detect_target)
-base_url=${NETFT_CLI_RELEASE_BASE_URL:-$DEFAULT_RELEASE_BASE_URL}
+if [ "${NETFT_CLI_RELEASE_BASE_URL+x}" = x ]; then
+  base_url=$NETFT_CLI_RELEASE_BASE_URL
+  release_transport=loopback
+else
+  base_url=$DEFAULT_RELEASE_BASE_URL
+  release_transport=production
+fi
 base_url=${base_url%/}
-case "$base_url" in
-  https://*)
-    release_transport=https
+case "$release_transport:$base_url" in
+  production:https://github.com/netft/netft-cli/releases)
     ;;
-  http://127.0.0.1:*)
+  loopback:http://127.0.0.1:*)
     printf '%s\n' "$base_url" |
       grep -Eq '^http://127\.0\.0\.1:[0-9]+(/[^[:space:]]*)?$' ||
       die "invalid loopback release fixture URL"
-    release_transport=http
     ;;
   *)
     die "release base URL must use HTTPS"
     ;;
 esac
 
-mkdir -p "$bin_dir"
-temporary=$(mktemp -d "$bin_dir/.netft-install.XXXXXX") ||
-  die "unable to create installation staging directory"
+if [ -L "$bin_dir" ]; then
+  die "installation directory must not be a symbolic link"
+fi
+if [ -e "$bin_dir" ]; then
+  [ -d "$bin_dir" ] || die "installation destination must be a directory"
+else
+  mkdir -p "$bin_dir"
+fi
+temporary=
+lock_path=$bin_dir/.netft-install.lock
+lock_acquired=0
 cleanup() {
-  rm -rf "$temporary"
+  if [ -n "$temporary" ]; then
+    rm -rf "$temporary"
+  fi
+  if [ "$lock_acquired" -eq 1 ]; then
+    rmdir "$lock_path" 2>/dev/null || :
+  fi
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+mkdir "$lock_path" 2>/dev/null ||
+  die "another installer is active for this destination"
+lock_acquired=1
+temporary=$(mktemp -d "$bin_dir/.netft-install.XXXXXX") ||
+  die "unable to create installation staging directory"
 
 checksums=$temporary/SHA256SUMS
 seen=$temporary/checksum-names
@@ -279,14 +472,14 @@ if [ "$version_provided" -eq 1 ]; then
   selected_version=$(normalize_version "$version_argument")
   asset_base="$base_url/download/v$selected_version"
   selected_name="netft-cli-$selected_version-$target.tar.gz"
-  download "$asset_base/SHA256SUMS" "$checksums" ||
+  download "$asset_base/SHA256SUMS" "$checksums" "$MAX_CHECKSUM_BYTES" ||
     die "unable to download SHA256SUMS"
   validate_checksum_inventory "$checksums" "$seen"
   assert_checksum_contract "$seen" "$selected_version"
   select_explicit_asset "$checksums" "$selected_name"
 else
   asset_base="$base_url/latest/download"
-  download "$asset_base/SHA256SUMS" "$checksums" ||
+  download "$asset_base/SHA256SUMS" "$checksums" "$MAX_CHECKSUM_BYTES" ||
     die "unable to download latest SHA256SUMS"
   validate_checksum_inventory "$checksums" "$seen"
   select_latest_asset "$checksums"
@@ -294,14 +487,14 @@ else
 fi
 
 archive=$temporary/$selected_name
-download "$asset_base/$selected_name" "$archive" ||
+download "$asset_base/$selected_name" "$archive" "$MAX_ARCHIVE_BYTES" ||
   die "unable to download $selected_name"
 actual_digest=$(sha256_file "$archive")
 [ "$actual_digest" = "$selected_digest" ] ||
   die "checksum mismatch for $selected_name"
 
 validate_and_extract_archive "$archive" "$temporary/extracted"
-candidate="$temporary/extracted/netft-cli-$selected_version/netft"
+candidate="$temporary/extracted/netft"
 version_output=$temporary/version-output
 if ! "$candidate" --version >"$version_output"; then
   die "downloaded netft executable failed its version check"

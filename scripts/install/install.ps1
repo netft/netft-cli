@@ -10,6 +10,11 @@ $ErrorActionPreference = "Stop"
 
 $Program = "netft.exe"
 $DefaultReleaseBaseUrl = "https://github.com/netft/netft-cli/releases"
+$MaxChecksumBytes = 1MB
+$MaxArchiveBytes = 64MB
+$MaxMemberBytes = 32MB
+$MaxExpandedBytes = 48MB
+$MaxRedirects = 5
 $StableVersionPattern = "^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 $AssetPattern = "^netft-cli-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-((linux-(x86_64|arm64)|macos-(x86_64|arm64))\.tar\.gz|windows-x86_64\.zip)$"
 $Temporary = $null
@@ -20,6 +25,7 @@ $ReplacementCompleted = $false
 $HadPreviousBinary = $false
 $PathUpdateAttempted = $false
 $OriginalUserPath = $null
+$InstallLock = $null
 $VersionWasProvided = $PSBoundParameters.ContainsKey("Version")
 $BinDirWasProvided = $PSBoundParameters.ContainsKey("BinDir")
 
@@ -53,17 +59,88 @@ function Get-ReleaseTarget {
 function Invoke-ReleaseDownload {
     param(
         [Parameter(Mandatory = $true)][uri]$Uri,
-        [Parameter(Mandatory = $true)][string]$Output
+        [Parameter(Mandatory = $true)][string]$Output,
+        [Parameter(Mandatory = $true)][long]$MaxBytes
     )
 
-    if (-not $IsLoopbackFixture -and $Uri.Scheme -cne "https") {
-        throw "Release downloads must use HTTPS."
+    $Current = $Uri
+    $RedirectCount = 0
+    $Part = "$Output.part"
+    while ($true) {
+        Assert-ReleaseUri $Current
+        Remove-Item -LiteralPath $Part -Force -ErrorAction SilentlyContinue
+        $Response = $null
+        $RequestError = $null
+        try {
+            $Response = Invoke-WebRequest -Uri $Current -OutFile $Part `
+                -UseBasicParsing -MaximumRedirection 0 -PassThru
+        } catch {
+            $RequestError = $_.Exception
+            if ($_.Exception.Response) {
+                $Response = $_.Exception.Response
+            } else {
+                throw
+            }
+        }
+        $StatusCode = [int]$Response.StatusCode
+        if ($StatusCode -ge 200 -and $StatusCode -lt 300) {
+            if ($RequestError) {
+                throw $RequestError
+            }
+            $Length = (Get-Item -LiteralPath $Part).Length
+            if ($Length -gt $MaxBytes) {
+                throw "Downloaded file exceeds the installer size limit."
+            }
+            [IO.File]::Move($Part, $Output)
+            return
+        }
+        if ($StatusCode -notin @(301, 302, 303, 307, 308)) {
+            throw "Release download returned HTTP $StatusCode."
+        }
+        if ($IsLoopbackFixture) {
+            throw "Loopback release fixtures must not redirect."
+        }
+        if ($RedirectCount -ge $MaxRedirects) {
+            throw "Release download exceeded the redirect limit."
+        }
+        $Location = $null
+        if ($Response.Headers.PSObject.Properties.Name -contains "Location") {
+            $Location = [string]$Response.Headers.Location
+        } else {
+            $Location = [string]$Response.Headers["Location"]
+        }
+        if ([string]::IsNullOrWhiteSpace($Location)) {
+            throw "Release redirect is missing Location."
+        }
+        $Current = [uri]::new($Current, $Location)
+        Assert-ReleaseUri $Current
+        $RedirectCount++
     }
-    if ($IsLoopbackFixture -and
-        ($Uri.Scheme -cne "http" -or $Uri.Host -cne "127.0.0.1")) {
-        throw "The local release fixture must remain on loopback HTTP."
+}
+
+function Assert-ReleaseUri {
+    param([Parameter(Mandatory = $true)][uri]$Uri)
+
+    if (-not $Uri.IsAbsoluteUri -or
+        -not [string]::IsNullOrEmpty($Uri.Fragment) -or
+        -not [string]::IsNullOrEmpty($Uri.UserInfo)) {
+        throw "Release URL is not accepted."
     }
-    Invoke-WebRequest -Uri $Uri -OutFile $Output -UseBasicParsing
+    if ($Uri.OriginalString -match "[\x00-\x20\x7f]") {
+        throw "Release URL contains whitespace or control characters."
+    }
+    if ($IsLoopbackFixture) {
+        if ($Uri.Scheme -cne "http" -or
+            $Uri.Host -cne "127.0.0.1" -or
+            $Uri.IsDefaultPort) {
+            throw "Release fixture escaped exact loopback."
+        }
+        return
+    }
+    if ($Uri.Scheme -cne "https" -or
+        [string]::IsNullOrWhiteSpace($Uri.DnsSafeHost)) {
+        throw "Production release downloads must remain on HTTPS."
+    }
 }
 
 function Read-ChecksumInventory {
@@ -121,6 +198,10 @@ function Assert-ZipPayload {
         [Parameter(Mandatory = $true)][string]$ReleaseVersion
     )
 
+    $ArchiveLength = (Get-Item -LiteralPath $Archive).Length
+    if ($ArchiveLength -gt $MaxArchiveBytes) {
+        throw "Release archive exceeds its size limit."
+    }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $Root = "netft-cli-$ReleaseVersion"
     $Expected = @(
@@ -131,6 +212,7 @@ function Assert-ZipPayload {
     )
     $Release = [IO.Compression.ZipFile]::OpenRead($Archive)
     try {
+        $ExpandedLength = [long]0
         $Names = @($Release.Entries | ForEach-Object { $_.FullName })
         if ($Names.Count -ne $Expected.Count) {
             throw "Release archive payload does not match the release contract."
@@ -140,6 +222,13 @@ function Assert-ZipPayload {
                 throw "Release archive payload does not match the release contract."
             }
             $Entry = $Release.Entries[$Index]
+            if ($Entry.Length -lt 0 -or $Entry.Length -gt $MaxMemberBytes) {
+                throw "Release archive member exceeds its size limit."
+            }
+            $ExpandedLength += $Entry.Length
+            if ($ExpandedLength -gt $MaxExpandedBytes) {
+                throw "Release archive exceeds its expanded size limit."
+            }
             $UnixType = ($Entry.ExternalAttributes -shr 16) -band 0xF000
             if ($UnixType -ne 0x8000) {
                 throw "Release archive members must be regular files."
@@ -278,22 +367,49 @@ try {
     }
     $BinDir = [IO.Path]::GetFullPath($BinDir)
 
-    $BaseUrlText = if ($env:NETFT_CLI_RELEASE_BASE_URL) {
-        $env:NETFT_CLI_RELEASE_BASE_URL.TrimEnd("/")
+    $ReleaseBaseOverride = Test-Path Env:NETFT_CLI_RELEASE_BASE_URL
+    $BaseUrlText = if ($ReleaseBaseOverride) {
+        $Override = $env:NETFT_CLI_RELEASE_BASE_URL
+        if ($Override -cnotmatch
+            "^http://127\.0\.0\.1:[0-9]+(/[^\s#]*)?$") {
+            throw "Release-base override must be an exact loopback test URL."
+        }
+        $Override.TrimEnd("/")
     } else {
         $DefaultReleaseBaseUrl
     }
     $BaseUri = [uri]$BaseUrlText
-    if ($BaseUri.Scheme -ceq "https") {
-        $IsLoopbackFixture = $false
-    } elseif ($BaseUri.Scheme -ceq "http" -and
-        $BaseUri.Host -ceq "127.0.0.1") {
-        $IsLoopbackFixture = $true
-    } else {
-        throw "Release base URL must use HTTPS."
-    }
+    $IsLoopbackFixture = $ReleaseBaseOverride
+    Assert-ReleaseUri $BaseUri
 
-    New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+    if (Test-Path -LiteralPath $BinDir) {
+        $BinItem = Get-Item -LiteralPath $BinDir -Force
+        if (-not $BinItem.PSIsContainer -or
+            ($BinItem.Attributes -band
+            [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Installation directory must be a real directory."
+        }
+    } else {
+        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+    }
+    $LockPath = Join-Path $BinDir ".netft-install.lock"
+    if (Test-Path -LiteralPath $LockPath) {
+        $LockItem = Get-Item -LiteralPath $LockPath -Force
+        if (($LockItem.Attributes -band
+            [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Installer lock path must not be a reparse point."
+        }
+    }
+    try {
+        $InstallLock = [IO.FileStream]::new(
+            $LockPath,
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+    } catch {
+        throw "Another installer is active for this destination."
+    }
     $Temporary = Join-Path $BinDir (
         ".netft-install." + [Guid]::NewGuid().ToString("N")
     )
@@ -302,7 +418,8 @@ try {
 
     if (-not $VersionWasProvided) {
         $AssetBase = "$BaseUrlText/latest/download"
-        Invoke-ReleaseDownload ([uri]"$AssetBase/SHA256SUMS") $Checksums
+        Invoke-ReleaseDownload ([uri]"$AssetBase/SHA256SUMS") $Checksums `
+            $MaxChecksumBytes
         $Entries = @(Read-ChecksumInventory $Checksums)
         $Candidates = @(
             $Entries | Where-Object {
@@ -328,7 +445,8 @@ try {
         $SelectedVersion = Normalize-Version $Version
         $SelectedName = "netft-cli-$SelectedVersion-$Target.zip"
         $AssetBase = "$BaseUrlText/download/v$SelectedVersion"
-        Invoke-ReleaseDownload ([uri]"$AssetBase/SHA256SUMS") $Checksums
+        Invoke-ReleaseDownload ([uri]"$AssetBase/SHA256SUMS") $Checksums `
+            $MaxChecksumBytes
         $Entries = @(Read-ChecksumInventory $Checksums)
         Assert-ChecksumContract $Entries $SelectedVersion
         $Candidates = @($Entries | Where-Object { $_.Name -ceq $SelectedName })
@@ -339,7 +457,8 @@ try {
     }
 
     $Archive = Join-Path $Temporary $SelectedName
-    Invoke-ReleaseDownload ([uri]"$AssetBase/$SelectedName") $Archive
+    Invoke-ReleaseDownload ([uri]"$AssetBase/$SelectedName") $Archive `
+        $MaxArchiveBytes
     $ActualDigest = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash
     if ($ActualDigest -cne $Selected.Digest.ToUpperInvariant()) {
         throw "Checksum mismatch for $SelectedName."
@@ -429,7 +548,13 @@ try {
     [Console]::Error.WriteLine("netft installer: " + $InstallError.Message)
     exit 1
 } finally {
-    if ($Temporary -and (Test-Path -LiteralPath $Temporary)) {
-        Remove-Item -LiteralPath $Temporary -Recurse -Force
+    try {
+        if ($Temporary -and (Test-Path -LiteralPath $Temporary)) {
+            Remove-Item -LiteralPath $Temporary -Recurse -Force
+        }
+    } finally {
+        if ($InstallLock) {
+            $InstallLock.Dispose()
+        }
     }
 }
