@@ -1183,8 +1183,8 @@ prefix-dev/setup-pixi: a09b6247153796b190642a2b53fac4241043cf6f
 actions/upload-artifact: 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
 actions/download-artifact: 3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
 actions/attest-build-provenance: 0f67c3f4856b2e3261c31976d6725780e5e4c373
-github/codeql-action: adfda868f108ac4222129de456ea554034a27db7
-codecov/codecov-action: a99c28d3f0da835de33ff2feb2e15691c7b9641f
+github/codeql-action: e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81
+codecov/codecov-action: fb8b3582c8e4def4969c97caa2f19720cb33a72f
 ```
 
 CI runners are `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-15`, and `windows-2025`. Linux runs `pixi run check`; every native runner builds and runs CTest plus an executable smoke test.

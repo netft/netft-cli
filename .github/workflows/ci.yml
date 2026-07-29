@@ -71,32 +71,60 @@ jobs:
 
       - if: matrix.target == 'windows-x86_64'
         shell: pwsh
-        run: >-
-          vcpkg install
-          curl:x64-windows-static
-          gtest:x64-windows-static
-          nlohmann-json:x64-windows-static
-
-      - if: matrix.target == 'windows-x86_64'
-        shell: pwsh
-        run: python -m pip install pytest
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          function Assert-NativeSuccess {
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native command failed with exit code $LASTEXITCODE."
+            }
+          }
+          vcpkg install `
+            curl:x64-windows-static `
+            gtest:x64-windows-static `
+            nlohmann-json:x64-windows-static
+          Assert-NativeSuccess
 
       - if: matrix.target == 'windows-x86_64'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          function Assert-NativeSuccess {
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native command failed with exit code $LASTEXITCODE."
+            }
+          }
+          python -m pip install pytest
+          Assert-NativeSuccess
+
+      - if: matrix.target == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          function Assert-NativeSuccess {
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native command failed with exit code $LASTEXITCODE."
+            }
+          }
           cmake -S . -B build/native `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static `
             -DBUILD_TESTING=ON
+          Assert-NativeSuccess
           cmake --build build/native --config Release
+          Assert-NativeSuccess
           ctest --test-dir build/native -C Release --output-on-failure
+          Assert-NativeSuccess
           & build/native/Release/netft.exe --version
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
+          Assert-NativeSuccess
 
       - if: matrix.target == 'windows-x86_64'
         shell: pwsh
         env:
           NETFT_EXECUTABLE: ${{ github.workspace }}\build\native\Release\netft.exe
-        run: test/artifact/install_ps1_test.ps1
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          & test/artifact/install_ps1_test.ps1

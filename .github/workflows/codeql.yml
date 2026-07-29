@@ -27,7 +27,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
         with:
           cache: true
-      - uses: github/codeql-action/init@adfda868f108ac4222129de456ea554034a27db7
+      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81
         with:
           languages: c-cpp
           build-mode: manual
@@ -36,4 +36,4 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTING=OFF
           pixi run cmake --build build/codeql
-      - uses: github/codeql-action/analyze@adfda868f108ac4222129de456ea554034a27db7
+      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81

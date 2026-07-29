@@ -129,26 +129,36 @@ jobs:
           NETFT_CLI_CURL_PREFIX: ${{ runner.temp }}\netft-curl
           NETFT_CLI_BUILD_JOBS: "2"
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          function Assert-NativeSuccess {
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native command failed with exit code $LASTEXITCODE."
+            }
+          }
           tools/build_windows_curl.ps1
           cmake -S . -B build/release `
             -DBUILD_TESTING=OFF `
             -DCURL_USE_STATIC_LIBS=ON `
             "-DCURL_ROOT=$env:NETFT_CLI_CURL_PREFIX"
+          Assert-NativeSuccess
           cmake --build build/release --config Release
+          Assert-NativeSuccess
           & build/release/Release/netft.exe --version
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
+          Assert-NativeSuccess
           $env:SOURCE_DATE_EPOCH = git show -s --format=%ct HEAD
+          Assert-NativeSuccess
           python tools/package_release.py `
             --binary build/release/Release/netft.exe `
             --version "${{ needs.validate.outputs.version }}" `
             --target "${{ matrix.target }}" `
             --output dist
+          Assert-NativeSuccess
           python tools/check_release.py `
             dist `
             --version "${{ needs.validate.outputs.version }}" `
             --allow-partial
+          Assert-NativeSuccess
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -219,6 +229,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: release-bundle
@@ -227,29 +240,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if state="$(
-            gh release view "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --json isDraft \
-              --jq .isDraft 2>/dev/null
-          )"; then
-            test "${state}" = true
-            gh release edit "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --draft \
-              --notes-file release/RELEASE_NOTES.md
-            gh release upload "${GITHUB_REF_NAME}" \
-              release/dist/* \
-              --repo "${GITHUB_REPOSITORY}" \
-              --clobber
+          metadata="${RUNNER_TEMP}/release-metadata.json"
+          asset_ids="${RUNNER_TEMP}/release-asset-ids"
+          release_endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}"
+          if gh api "${release_endpoint}" \
+              >"${metadata}" 2>/dev/null; then
+            python3 tools/release_inventory.py asset-ids \
+              --metadata "${metadata}" >"${asset_ids}"
           else
             gh release create "${GITHUB_REF_NAME}" \
-              release/dist/* \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
               --draft \
               --notes-file release/RELEASE_NOTES.md
+            gh api "${release_endpoint}" >"${metadata}"
+            python3 tools/release_inventory.py asset-ids \
+              --metadata "${metadata}" >"${asset_ids}"
           fi
+
+          while IFS= read -r asset_id; do
+            gh api "${release_endpoint}" >"${metadata}"
+            python3 tools/release_inventory.py asset-ids \
+              --metadata "${metadata}" >"${RUNNER_TEMP}/current-asset-ids"
+            grep -Fxq "${asset_id}" "${RUNNER_TEMP}/current-asset-ids"
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+          done <"${asset_ids}"
+
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --notes-file release/RELEASE_NOTES.md
+          gh release upload "${GITHUB_REF_NAME}" \
+            release/dist/* \
+            --repo "${GITHUB_REPOSITORY}"
+          gh api "${release_endpoint}" >"${metadata}"
+          python3 tools/release_inventory.py validate-remote \
+            --metadata "${metadata}" \
+            --version "${GITHUB_REF_NAME#v}"
 
   smoke:
     needs: draft_release
@@ -283,10 +311,14 @@ jobs:
           asset_directory="${RUNNER_TEMP}/release-root/releases/download/${GITHUB_REF_NAME}"
           install_directory="${RUNNER_TEMP}/netft-install"
           mkdir -p "${asset_directory}" "${install_directory}"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+            >"${RUNNER_TEMP}/release-metadata.json"
+          python3 tools/release_inventory.py validate-remote \
+            --metadata "${RUNNER_TEMP}/release-metadata.json" \
+            --version "${version}"
           gh release download "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --pattern 'netft-cli-*' \
-            --pattern SHA256SUMS \
             --dir "${asset_directory}"
           NETFT_RELEASE_DIR="${asset_directory}" VERSION="${version}" \
             python3 -c \
@@ -319,16 +351,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          function Assert-NativeSuccess {
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native command failed with exit code $LASTEXITCODE."
+            }
+          }
           $Version = $env:GITHUB_REF_NAME.Substring(1)
           $Root = Join-Path $env:RUNNER_TEMP "release-root"
           $Assets = Join-Path $Root "releases\download\$env:GITHUB_REF_NAME"
           $Install = Join-Path $env:RUNNER_TEMP "netft-install"
+          $Metadata = Join-Path $env:RUNNER_TEMP "release-metadata.json"
+          $ReleaseEndpoint = "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:GITHUB_REF_NAME"
           New-Item -ItemType Directory -Force -Path $Assets, $Install | Out-Null
+          gh api $ReleaseEndpoint > $Metadata
+          Assert-NativeSuccess
+          python tools/release_inventory.py validate-remote `
+            --metadata $Metadata `
+            --version $Version
+          Assert-NativeSuccess
           gh release download $env:GITHUB_REF_NAME `
             --repo $env:GITHUB_REPOSITORY `
-            --pattern "netft-cli-*" `
-            --pattern "SHA256SUMS" `
             --dir $Assets
+          Assert-NativeSuccess
           $env:NETFT_RELEASE_DIR = $Assets
           $env:VERSION = $Version
           python -c @'
@@ -337,6 +383,7 @@ jobs:
           from tools.check_release import validate_inventory
           validate_inventory(Path(os.environ["NETFT_RELEASE_DIR"]), os.environ["VERSION"])
           '@
+          Assert-NativeSuccess
           $Server = Start-Process python `
             -ArgumentList "-m", "http.server", "49152", "--bind", "127.0.0.1", "--directory", $Root `
             -PassThru
@@ -358,9 +405,7 @@ jobs:
             $env:NETFT_CLI_RELEASE_BASE_URL = "http://127.0.0.1:49152/releases"
             scripts/install/install.ps1 -Version $Version -BinDir $Install -NoModifyPath
             & (Join-Path $Install "netft.exe") --version
-            if ($LASTEXITCODE -ne 0) {
-              exit $LASTEXITCODE
-            }
+            Assert-NativeSuccess
           } finally {
             Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue
           }
@@ -371,9 +416,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+            >"${RUNNER_TEMP}/release-metadata.json"
+          python3 tools/release_inventory.py validate-remote \
+            --metadata "${RUNNER_TEMP}/release-metadata.json" \
+            --version "${GITHUB_REF_NAME#v}"
           gh release edit "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --draft=false

@@ -28,8 +28,12 @@ ACTION_REVISIONS = {
     "actions/attest-build-provenance": (
         "0f67c3f4856b2e3261c31976d6725780e5e4c373"
     ),
-    "github/codeql-action": "adfda868f108ac4222129de456ea554034a27db7",
-    "codecov/codecov-action": "a99c28d3f0da835de33ff2feb2e15691c7b9641f",
+    "github/codeql-action": "e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81",
+    "codecov/codecov-action": "fb8b3582c8e4def4969c97caa2f19720cb33a72f",
+}
+OBSOLETE_ACTION_OBJECTS = {
+    "adfda868f108ac4222129de456ea554034a27db7",
+    "a99c28d3f0da835de33ff2feb2e15691c7b9641f",
 }
 
 
@@ -85,6 +89,41 @@ def load_release_notes_module() -> ModuleType:
     return module
 
 
+def load_release_inventory_module() -> ModuleType:
+    path = ROOT / "tools" / "release_inventory.py"
+    assert path.is_file()
+    spec = importlib.util.spec_from_file_location("release_inventory", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def assert_pwsh_fail_fast(script: str) -> None:
+    error_preference = '$ErrorActionPreference = "Stop"'
+    native_preference = "$PSNativeCommandUseErrorActionPreference = $true"
+    assert error_preference in script
+    assert native_preference in script
+    first_command = min(
+        (
+            position
+            for token in ("cmake", "ctest", "gh ", "python", "netft", "vcpkg")
+            if (position := script.find(token)) >= 0
+        ),
+        default=len(script),
+    )
+    assert script.index(error_preference) < first_command
+    assert script.index(native_preference) < first_command
+    critical_native_command = re.search(
+        r"(?m)^\s*(?:cmake|ctest|gh|python|vcpkg)\b"
+        r"|^\s*&\s+.*netft(?:\.exe)?\b",
+        script,
+    )
+    if critical_native_command is not None:
+        assert "function Assert-NativeSuccess" in script
+        assert len(re.findall(r"(?m)^\s*Assert-NativeSuccess\s*$", script)) >= 1
+
+
 @pytest.mark.parametrize("name", ["ci", "codeql", "coverage", "release"])
 def test_workflow_defaults_are_read_only_and_avoid_untrusted_privilege(
     name: str,
@@ -114,6 +153,7 @@ def test_every_external_action_is_pinned_and_checkout_drops_credentials() -> Non
                 else owner
             )
             assert ACTION_REVISIONS[root_action] == revision
+            assert revision not in OBSOLETE_ACTION_OBJECTS
             observed.add(root_action)
             if owner == "actions/checkout":
                 assert step.get("with", {}).get("persist-credentials") is False
@@ -139,6 +179,34 @@ def test_native_ci_covers_exact_platforms_and_required_native_evidence() -> None
         for step in native["steps"]
         if isinstance(step, dict)
     )
+
+
+def test_every_powershell_workflow_step_enables_native_fail_fast() -> None:
+    powershell_steps = []
+    for path in sorted(WORKFLOW_DIRECTORY.glob("*.yml")):
+        workflow = load_yaml(path)
+        powershell_steps.extend(
+            step
+            for step in iter_steps(workflow)
+            if step.get("shell") == "pwsh" and "run" in step
+        )
+
+    assert powershell_steps
+    for step in powershell_steps:
+        assert_pwsh_fail_fast(str(step["run"]))
+
+
+def test_powershell_contract_rejects_late_success_overwriting_failure() -> None:
+    unsafe = """\
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
+ctest --test-dir build/native
+netft.exe --version
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+"""
+
+    with pytest.raises(AssertionError):
+        assert_pwsh_fail_fast(unsafe)
 
 
 def test_linux_complete_check_includes_workflow_contracts() -> None:
@@ -249,10 +317,18 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
     assert jobs["draft_release"]["needs"] == ["assemble", "attest"]
     assert jobs["draft_release"]["permissions"] == {"contents": "write"}
     assert "--draft" in commands(jobs["draft_release"])
+    draft_script = commands(jobs["draft_release"])
+    assert "asset-ids" in draft_script
+    assert "--method DELETE" in draft_script
+    assert "validate-remote" in draft_script
+    assert "releases/tags/" in draft_script
     assert matrix_targets(jobs["smoke"]) == TARGETS
     assert jobs["smoke"]["needs"] == "draft_release"
     smoke_script = commands(jobs["smoke"])
     assert "gh release download" in smoke_script
+    assert "--pattern" not in smoke_script
+    assert "validate-remote" in smoke_script
+    assert "releases/tags/" in smoke_script
     assert "scripts/install/install.sh" in smoke_script
     assert "scripts/install/install.ps1" in smoke_script
     assert (
@@ -262,11 +338,73 @@ def test_release_dag_attests_drafts_smokes_all_installers_then_publishes() -> No
     assert '"http://127.0.0.1:49152/releases"' in smoke_script
     assert jobs["publish"]["needs"] == "smoke"
     assert jobs["publish"]["permissions"] == {"contents": "write"}
+    assert "validate-remote" in commands(jobs["publish"])
+    assert "releases/tags/" in commands(jobs["publish"])
     assert (
         'gh release edit "${GITHUB_REF_NAME}" \\\n'
         '  --repo "${GITHUB_REPOSITORY}" \\\n'
         "  --draft=false"
     ) in commands(jobs["publish"])
+
+
+def test_remote_release_inventory_requires_exact_draft_assets() -> None:
+    release_inventory = load_release_inventory_module()
+    names = sorted(release_inventory.expected_asset_names("0.1.0"))
+    metadata = {
+        "draft": True,
+        "assets": [
+            {"id": index + 1, "name": name}
+            for index, name in enumerate(names)
+        ],
+    }
+
+    release_inventory.validate_remote_inventory(metadata, "0.1.0")
+
+    for changed in (
+        {**metadata, "draft": False},
+        {**metadata, "assets": metadata["assets"][:-1]},
+        {
+            **metadata,
+            "assets": [
+                *metadata["assets"],
+                {"id": 99, "name": "stale-extra.zip"},
+            ],
+        },
+        {
+            **metadata,
+            "assets": [
+                *metadata["assets"],
+                {"id": 99, "name": metadata["assets"][0]["name"]},
+            ],
+        },
+    ):
+        with pytest.raises(release_inventory.ReleaseInventoryError):
+            release_inventory.validate_remote_inventory(changed, "0.1.0")
+
+
+def test_draft_cleanup_returns_only_valid_asset_ids() -> None:
+    release_inventory = load_release_inventory_module()
+    metadata = {
+        "draft": True,
+        "assets": [
+            {"id": 17, "name": "stale"},
+            {"id": 23, "name": "older"},
+        ],
+    }
+
+    assert release_inventory.draft_asset_ids(metadata) == [17, 23]
+
+    with pytest.raises(release_inventory.ReleaseInventoryError):
+        release_inventory.draft_asset_ids({**metadata, "draft": False})
+
+    malformed = {
+        **metadata,
+        "assets": [
+            {"id": "17", "name": "outside"}
+        ],
+    }
+    with pytest.raises(release_inventory.ReleaseInventoryError):
+        release_inventory.draft_asset_ids(malformed)
 
 
 def test_release_notes_join_wrapped_bullet_continuations() -> None:
