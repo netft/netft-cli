@@ -1,0 +1,94 @@
+name: Bug report
+description: Report reproducible incorrect behavior in netft-cli
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove credentials, exact private addresses, and other sensitive network data before submitting. Report security vulnerabilities privately through SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: netft version
+      description: Use the installed version from `netft --version` or a commit ID.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Command or component
+      options:
+        - info
+        - monitor
+        - bias
+        - Installer or release archive
+        - Source build
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Platform and architecture
+      options:
+        - Linux x86_64
+        - Linux ARM64
+        - macOS Intel x86_64
+        - macOS Apple silicon
+        - Windows x86_64
+        - Source build on another platform
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS version, terminal or redirection context, install method, and compiler and libcurl versions for source builds.
+    validations:
+      required: true
+  - type: textarea
+    id: sensor
+    attributes:
+      label: Sensor details
+      description: Include the sensor model, firmware, reported units, and calibration when hardware is involved; otherwise enter "Not applicable."
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Sanitized network setup
+      description: Describe direct or switched topology, routing, and firewall behavior without exact private addresses or credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest safe sequence and sanitized command arguments that reproduce the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized logs or structured output when useful.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: No hardware was used, or the connected sensor and equipment were kept in a safe state for every reported action.
+          required: true
+        - label: Exact private addresses, credentials, and sensitive data have been removed.
+          required: true

@@ -1,0 +1,77 @@
+name: Hardware compatibility
+description: Report verified or unsuccessful behavior with an ATI Net F/T sensor
+title: "[Hardware] "
+labels:
+  - hardware
+body:
+  - type: input
+    id: version
+    attributes:
+      label: netft version or commit
+    validations:
+      required: true
+  - type: input
+    id: sensor
+    attributes:
+      label: Sensor model
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Sensor firmware
+    validations:
+      required: true
+  - type: textarea
+    id: calibration
+    attributes:
+      label: Discovered calibration and units
+      description: Include the sensor-reported force unit, torque unit, and counts-per-unit values.
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Platform and architecture
+      options:
+        - Linux x86_64
+        - Linux ARM64
+        - macOS Intel x86_64
+        - macOS Apple silicon
+        - Windows x86_64
+        - Source build on another platform
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Sanitized network setup
+      description: Describe direct or switched topology, routing, and firewall behavior without exact private addresses or credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Compatibility results
+      description: Describe the info, monitor, bias, reconnect, interruption, and output-format behavior actually exercised.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification commands
+      description: List exact commands with private hosts replaced by a placeholder and include sanitized results.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Hardware safety
+      options:
+        - label: Testing was supervised and the sensor and connected equipment remained in a safe state.
+          required: true
+        - label: The sensor was unloaded or safely fixtured before every bias operation, or bias was not tested.
+          required: true
+        - label: Exact private addresses, credentials, and sensitive data have been removed.
+          required: true

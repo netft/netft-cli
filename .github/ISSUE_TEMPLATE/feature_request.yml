@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a focused improvement to netft-cli
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or automation need and why current behavior does not meet it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the observable command, output, or workflow behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - All supported platforms
+        - Linux
+        - macOS
+        - Windows
+        - Sensor-specific behavior
+        - Documentation or contribution workflow
+    validations:
+      required: true
+  - type: textarea
+    id: sensor
+    attributes:
+      label: Sensor details
+      description: Include model, firmware, units, and calibration only when the request depends on specific hardware.
+    validations:
+      required: false
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and alternatives
+      description: Include compatibility, structured-output, safety, and sanitized network constraints, plus alternatives considered.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Proposed verification
+      description: Describe exact observable checks that would demonstrate completion.
+    validations:
+      required: true
