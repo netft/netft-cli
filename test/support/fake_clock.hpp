@@ -1,6 +1,7 @@
 #pragma once
 
 #include "platform/clock.hpp"
+#include "platform/interrupt.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -17,7 +18,7 @@ public:
 
   [[nodiscard]] TimePoint now() const override { return now_; }
 
-  void sleep_until(TimePoint deadline) override {
+  [[nodiscard]] bool wait_until(TimePoint deadline, const InterruptFlag &interrupt) override {
     deadlines_.push_back(deadline);
     now_ = std::max(now_, deadline);
     now_ += next_overshoot_;
@@ -25,10 +26,12 @@ public:
     if (sleep_hook_) {
       sleep_hook_(deadlines_.size());
     }
+    return !interrupt.requested();
   }
 
   void set_next_sleep_overshoot(Duration overshoot) noexcept { next_overshoot_ = overshoot; }
   void set_sleep_hook(SleepHook hook) { sleep_hook_ = std::move(hook); }
+  void set_now(TimePoint now) noexcept { now_ = now; }
 
   [[nodiscard]] const std::vector<TimePoint> &deadlines() const noexcept { return deadlines_; }
 

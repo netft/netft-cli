@@ -260,6 +260,70 @@ TEST(MonitorCommand, RejectsUnsupportedFormatBeforeOutputOrNetwork) {
   EXPECT_EQ(backend.open_calls(), 0U);
 }
 
+TEST(MonitorCommand, RejectsUnrepresentableScheduleBeforeOutputOrNetwork) {
+  test::FakeBackend backend;
+  auto options = test::monitor_for(50ms);
+  options.rate_hz = 1e-320;
+  test::FakeClock clock;
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+
+  test::expect_app_error(
+      ExitCode::Usage, [&] { run_monitor(options, backend, output.context(), interrupt, clock); });
+
+  options.rate_hz = 20.0;
+  options.duration = std::chrono::duration<double>{1e300};
+  test::expect_app_error(
+      ExitCode::Usage, [&] { run_monitor(options, backend, output.context(), interrupt, clock); });
+
+  EXPECT_EQ(backend.discover_calls(), 0U);
+  EXPECT_EQ(backend.open_calls(), 0U);
+}
+
+TEST(MonitorCommand, RejectsScheduleThatCannotAdvancePastClockMaximum) {
+  test::FakeBackend backend;
+  auto options = test::monitor_for(50ms);
+  test::FakeClock clock;
+  clock.set_now(Clock::TimePoint::max());
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+
+  test::expect_app_error(
+      ExitCode::Usage, [&] { run_monitor(options, backend, output.context(), interrupt, clock); });
+
+  EXPECT_EQ(backend.discover_calls(), 0U);
+  EXPECT_EQ(backend.open_calls(), 0U);
+}
+
+TEST(MonitorCommand, HandlesMinimumClockOriginAndCrossEpochOvershoot) {
+  test::FakeBackend backend;
+  backend.set_configuration(test::configuration());
+  auto first_sample = test::sample(16);
+  first_sample.received_at = Clock::TimePoint::min();
+  backend.session().set_samples({first_sample});
+  backend.session().set_health(test::health());
+  auto options = test::monitor_for(50ms);
+  options.rate_hz = 1.0;
+  options.duration.reset();
+  test::FakeClock clock;
+  clock.set_now(Clock::TimePoint::min());
+  clock.set_next_sleep_overshoot(Clock::Duration::max());
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  clock.set_sleep_hook([&](std::size_t count) {
+    if (count == 2U) {
+      interrupt.request();
+    }
+  });
+
+  EXPECT_EQ(run_monitor(options, backend, output.context(), interrupt, clock),
+            static_cast<int>(ExitCode::Interrupted));
+
+  ASSERT_EQ(clock.deadlines().size(), 2U);
+  EXPECT_GT(clock.deadlines()[1], clock.deadlines()[0]);
+  EXPECT_EQ(backend.session().stop_calls(), 1U);
+}
+
 TEST(MonitorCommand, MapsMissingFirstSampleToStreamFailureAndStopsSession) {
   test::FakeBackend backend;
   backend.set_configuration(test::configuration());

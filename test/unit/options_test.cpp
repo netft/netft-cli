@@ -122,6 +122,7 @@ TEST(Options, RejectsPortsOutsideRange) {
 TEST(Options, RejectsNonpositiveOrNonfiniteRateAndTimeout) {
   expect_usage_error({"monitor", "sensor.local", "--rate", "0"});
   expect_usage_error({"monitor", "sensor.local", "--rate", "nan"});
+  expect_usage_error({"monitor", "sensor.local", "--rate", "1e-320"});
   expect_usage_error({"monitor", "sensor.local", "--timeout", "0s"});
   expect_usage_error({"monitor", "sensor.local", "--timeout", "infs"});
 }
@@ -132,6 +133,11 @@ TEST(Options, RejectsMalformedDuration) {
   expect_usage_error({"monitor", "sensor.local", "--duration", "0s"});
   expect_usage_error({"monitor", "sensor.local", "--duration", "-1s"});
   expect_usage_error({"monitor", "sensor.local", "--duration", "nans"});
+}
+
+TEST(Options, RejectsDurationsOutsideSteadyClockRange) {
+  expect_usage_error(
+      {"monitor", "sensor.local", "--duration", "999999999999999999999999999999999999999s"});
 }
 
 TEST(Options, RejectsUrlInsteadOfHost) {

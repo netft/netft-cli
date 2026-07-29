@@ -129,7 +129,7 @@ if(BUILD_TESTING)
     add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
   endforeach()
 
-  foreach(test_name IN ITEMS interrupt terminal)
+  foreach(test_name IN ITEMS clock interrupt terminal)
     add_executable(netft_${test_name}_test test/unit/${test_name}_test.cpp)
     target_compile_features(netft_${test_name}_test PRIVATE cxx_std_17)
     target_link_libraries(netft_${test_name}_test PRIVATE

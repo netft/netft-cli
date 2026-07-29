@@ -9,9 +9,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 namespace netft_cli {
 namespace {
@@ -132,23 +136,94 @@ private:
   std::unique_ptr<TerminalMonitor> terminal_monitor_;
 };
 
+Clock::Duration checked_clock_duration(std::chrono::duration<double> value, std::string_view name) {
+  const double seconds = value.count();
+  const double minimum = std::chrono::duration<double>{Clock::Duration{1}}.count();
+  const double maximum = std::chrono::duration<double>{Clock::Duration::max()}.count();
+  if (!std::isfinite(seconds) || seconds < minimum || seconds >= maximum) {
+    throw AppError{ExitCode::Usage, std::string{name} + " is outside the supported clock range"};
+  }
+  return std::chrono::duration_cast<Clock::Duration>(value);
+}
+
 Clock::Duration period_for(double rate_hz) {
-  const auto period =
-      std::chrono::duration_cast<Clock::Duration>(std::chrono::duration<double>{1.0 / rate_hz});
-  return std::max(period, Clock::Duration{1});
+  return checked_clock_duration(std::chrono::duration<double>{1.0 / rate_hz}, "rate");
 }
 
 Clock::Duration duration_ticks(std::chrono::duration<double> duration) {
-  return std::chrono::duration_cast<Clock::Duration>(duration);
+  return checked_clock_duration(duration, "duration");
+}
+
+using Tick = Clock::Duration::rep;
+using UnsignedTick = std::make_unsigned_t<Tick>;
+
+static_assert(std::is_integral_v<Tick> && std::is_signed_v<Tick>);
+
+UnsignedTick negative_magnitude(Tick value) {
+  return static_cast<UnsignedTick>(-(value + 1)) + UnsignedTick{1};
+}
+
+UnsignedTick positive_distance(Tick later, Tick earlier) {
+  if (earlier < 0 && later >= 0) {
+    return negative_magnitude(earlier) + static_cast<UnsignedTick>(later);
+  }
+  return static_cast<UnsignedTick>(later - earlier);
+}
+
+Tick add_positive_ticks(Tick origin, UnsignedTick increment) {
+  if (increment == 0) {
+    return origin;
+  }
+  if (origin < 0) {
+    const auto magnitude = negative_magnitude(origin);
+    if (increment < magnitude) {
+      return -static_cast<Tick>(magnitude - increment);
+    }
+    if (increment == magnitude) {
+      return Tick{0};
+    }
+    return static_cast<Tick>(increment - magnitude);
+  }
+  return origin + static_cast<Tick>(increment);
+}
+
+std::optional<Clock::TimePoint> try_add(Clock::TimePoint origin, Clock::Duration duration) {
+  if (duration <= Clock::Duration::zero()) {
+    return std::nullopt;
+  }
+  const Tick origin_ticks = origin.time_since_epoch().count();
+  const auto increment = static_cast<UnsignedTick>(duration.count());
+  const Tick maximum = Clock::TimePoint::max().time_since_epoch().count();
+  if (increment > positive_distance(maximum, origin_ticks)) {
+    return std::nullopt;
+  }
+  return Clock::TimePoint{Clock::Duration{add_positive_ticks(origin_ticks, increment)}};
+}
+
+Clock::TimePoint checked_add(Clock::TimePoint origin, Clock::Duration duration,
+                             std::string_view name) {
+  if (const auto result = try_add(origin, duration)) {
+    return *result;
+  }
+  throw AppError{ExitCode::Usage, std::string{name} + " is outside the supported clock range"};
 }
 
 Clock::TimePoint first_deadline_after(Clock::TimePoint origin, Clock::Duration period,
                                       Clock::TimePoint time) {
   if (time < origin) {
-    return origin + period;
+    return *try_add(origin, period);
   }
-  const auto completed_periods = (time - origin) / period;
-  return origin + period * (completed_periods + 1);
+  const Tick origin_ticks = origin.time_since_epoch().count();
+  const Tick time_ticks = time.time_since_epoch().count();
+  const Tick maximum = Clock::TimePoint::max().time_since_epoch().count();
+  const auto period_ticks = static_cast<UnsignedTick>(period.count());
+  const auto completed_periods = positive_distance(time_ticks, origin_ticks) / period_ticks;
+  const auto maximum_periods = positive_distance(maximum, origin_ticks) / period_ticks;
+  if (completed_periods >= maximum_periods) {
+    return Clock::TimePoint::max();
+  }
+  const auto increment = period_ticks * (completed_periods + UnsignedTick{1});
+  return Clock::TimePoint{Clock::Duration{add_positive_ticks(origin_ticks, increment)}};
 }
 
 } // namespace
@@ -156,6 +231,15 @@ Clock::TimePoint first_deadline_after(Clock::TimePoint origin, Clock::Duration p
 int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputContext &output,
                 InterruptFlag &interrupt, Clock &clock) {
   const auto format = resolve_format(options, output);
+  const auto origin = clock.now();
+  const auto period = period_for(options.rate_hz);
+  const auto first_deadline = checked_add(origin, period, "rate");
+  const auto duration = options.duration
+                            ? std::optional<Clock::Duration>{duration_ticks(*options.duration)}
+                            : std::nullopt;
+  const auto end = duration
+                       ? std::optional<Clock::TimePoint>{checked_add(origin, *duration, "duration")}
+                       : std::nullopt;
   OutputHandle destination = options.output.has_value()
                                  ? OutputHandle::file(*options.output)
                                  : OutputHandle::standard(output.standard_output);
@@ -163,7 +247,6 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
   LatestSampleSlot latest;
   auto session = open_session(options, backend);
   SessionStop stop_session(*session);
-  const auto origin = clock.now();
 
   try {
     session->start([&latest](const netft::Sample &sample) { latest.publish(sample); });
@@ -188,11 +271,7 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
 
   SampleOutput sample_output(format, destination,
                              !options.output.has_value() && output.output_is_terminal);
-  const auto period = period_for(options.rate_hz);
-  auto deadline = origin + period;
-  const std::optional<Clock::TimePoint> end =
-      options.duration ? std::optional<Clock::TimePoint>{origin + duration_ticks(*options.duration)}
-                       : std::nullopt;
+  auto deadline = first_deadline;
   const auto finish = [&](int status) {
     sample_output.close();
     stop_session.stop();
@@ -213,8 +292,7 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
       return finish(0);
     }
 
-    clock.sleep_until(deadline);
-    if (interrupt.requested()) {
+    if (!clock.wait_until(deadline, interrupt)) {
       return finish(static_cast<int>(ExitCode::Interrupted));
     }
     if (end && clock.now() > *end) {

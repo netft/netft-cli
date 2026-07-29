@@ -1,6 +1,7 @@
 #include "cli/options.hpp"
 
 #include "app/error.hpp"
+#include "platform/clock.hpp"
 
 #include <charconv>
 #include <cmath>
@@ -41,6 +42,14 @@ double parse_positive_number(std::string_view value, const std::string &name) {
   return number;
 }
 
+void require_representable_clock_duration(double seconds, const std::string &name) {
+  const double minimum = std::chrono::duration<double>{Clock::Duration{1}}.count();
+  const double maximum = std::chrono::duration<double>{Clock::Duration::max()}.count();
+  if (seconds < minimum || seconds >= maximum) {
+    usage_error(name + " is outside the supported clock range");
+  }
+}
+
 std::chrono::duration<double> parse_duration(std::string_view value) {
   std::string_view number = value;
   double scale{};
@@ -76,6 +85,7 @@ std::chrono::duration<double> parse_duration(std::string_view value) {
   if (!std::isfinite(seconds) || seconds <= 0.0) {
     usage_error("Duration must be a positive finite decimal");
   }
+  require_representable_clock_duration(seconds, "Duration");
   return std::chrono::duration<double>(seconds);
 }
 
@@ -188,6 +198,11 @@ Action parse_arguments(const std::vector<std::string_view> &arguments) {
         usage_error("Rate is only available for monitor");
       }
       rate_hz = parse_positive_number(option_value(arguments, index), "Rate");
+      const double period_seconds = 1.0 / rate_hz;
+      if (!std::isfinite(period_seconds)) {
+        usage_error("Rate is outside the supported clock range");
+      }
+      require_representable_clock_duration(period_seconds, "Rate");
     } else if (argument == "--duration") {
       if (command != "monitor") {
         usage_error("Duration is only available for monitor");
