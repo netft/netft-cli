@@ -1,6 +1,50 @@
+# Local worktrees and development plans
 .worktrees/
-build/
-dist/
+.superpowers/
+
+# Pixi environments
 .pixi/
-__pycache__/
+
+# CMake and build outputs
+build/
+build-*/
+dist/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+cmake_install.cmake
+compile_commands.json
+
+# Test, sanitizer, and coverage outputs
+.cache/
 .pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.gcda
+*.gcno
+*.profdata
+*.profraw
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Editors
+.idea/
+.vscode/
+*.swo
+*.swp
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
