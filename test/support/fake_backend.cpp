@@ -44,7 +44,7 @@ void FakeSession::bias(BiasCompletion on_command_complete) {
   for (const auto &sample : during_bias_samples_) {
     callback_(sample);
   }
-  on_command_complete();
+  on_command_complete(bias_completion_boundary_);
   for (const auto &sample : completion_boundary_samples_) {
     callback_(sample);
   }

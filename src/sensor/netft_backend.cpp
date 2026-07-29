@@ -45,7 +45,7 @@ public:
   void bias(BiasCompletion on_command_complete) override {
     std::scoped_lock lock(callback_gate_);
     client_.bias();
-    on_command_complete();
+    on_command_complete(std::chrono::steady_clock::now());
   }
   netft::HealthSnapshot health() const override { return client_.health(); }
 

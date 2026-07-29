@@ -4,6 +4,7 @@
 
 #include <netft/discovery.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
@@ -29,6 +30,9 @@ public:
   void set_completion_boundary_samples(std::vector<netft::Sample> samples) {
     completion_boundary_samples_ = std::move(samples);
   }
+  void set_bias_completion_boundary(std::chrono::steady_clock::time_point boundary) noexcept {
+    bias_completion_boundary_ = boundary;
+  }
   void set_health(netft::HealthSnapshot health) { health_ = std::move(health); }
   void fail_start(bool fail = true) noexcept { fail_start_ = fail; }
   void fail_bias(bool fail = true) noexcept { fail_bias_ = fail; }
@@ -42,6 +46,7 @@ private:
   std::vector<netft::Sample> post_bias_samples_;
   std::vector<netft::Sample> during_bias_samples_;
   std::vector<netft::Sample> completion_boundary_samples_;
+  std::chrono::steady_clock::time_point bias_completion_boundary_{};
   Callback callback_;
   netft::HealthSnapshot health_;
   std::size_t start_calls_{};

@@ -230,6 +230,53 @@ TEST(BiasCommand, QualifyingCallbackAtCommandCompletionBoundaryIsNotLost) {
   EXPECT_EQ(document.at("after").at("rdt_sequence"), 11U);
 }
 
+TEST(BiasCommand, StaleDifferentSequenceQueuedBehindBiasGateDoesNotProduceSuccess) {
+  test::FakeBackend backend;
+  prepare(backend, 10);
+  const auto boundary = std::chrono::steady_clock::time_point{3s};
+  auto stale = test::sample(11);
+  stale.received_at = boundary - 1ns;
+  backend.session().set_bias_completion_boundary(boundary);
+  backend.session().set_completion_boundary_samples({stale});
+  auto options = test::bias_options(true);
+  options.connection.timeout = 1ms;
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  test::expect_app_error(ExitCode::Stream, [&] {
+    run_bias(options, backend, output.context(), confirmation, interrupt);
+  });
+
+  EXPECT_EQ(backend.session().bias_calls(), 1U);
+  EXPECT_EQ(backend.session().stop_calls(), 1U);
+  EXPECT_TRUE(output.standard_output_text().empty());
+}
+
+TEST(BiasCommand, StaleQueuedCallbackIsIgnoredBeforeFreshPostBoundarySample) {
+  test::FakeBackend backend;
+  prepare(backend, 10);
+  const auto boundary = std::chrono::steady_clock::time_point{3s};
+  auto stale = test::sample(11);
+  stale.received_at = boundary - 1ns;
+  auto fresh = test::sample(12);
+  fresh.received_at = boundary;
+  backend.session().set_bias_completion_boundary(boundary);
+  backend.session().set_completion_boundary_samples({stale, fresh});
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+  test::FakeConfirmation confirmation(false);
+
+  EXPECT_EQ(run_bias(test::bias_options(true), backend, output.context(), confirmation, interrupt),
+            0);
+
+  const auto document = test::parse_json(output.standard_output_text());
+  EXPECT_EQ(document.at("before").at("rdt_sequence"), 10U);
+  EXPECT_EQ(document.at("after").at("rdt_sequence"), 12U);
+  EXPECT_EQ(backend.session().bias_calls(), 1U);
+  EXPECT_EQ(backend.session().stop_calls(), 1U);
+}
+
 TEST(BiasCommand, NoPreBiasSampleDoesNotSendBias) {
   test::FakeBackend backend;
   backend.set_configuration(test::configuration());
