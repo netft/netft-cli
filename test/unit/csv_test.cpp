@@ -7,6 +7,7 @@
 
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 
 namespace netft_cli {
 namespace {
@@ -71,6 +72,29 @@ TEST(Csv, QuotesTextAccordingToRfc4180) {
 
   ASSERT_EQ(table.rows.size(), 1U);
   EXPECT_EQ(table.rows[0][0], record.host);
+}
+
+TEST(CsvParser, RejectsBareQuoteInUnquotedField) {
+  EXPECT_THROW(static_cast<void>(test::parse_csv("column\r\nbare\"quote\r\n")), std::runtime_error);
+}
+
+TEST(CsvParser, RejectsCharactersAfterClosingQuote) {
+  EXPECT_THROW(static_cast<void>(test::parse_csv("column\r\n\"closed\"suffix\r\n")),
+               std::runtime_error);
+}
+
+TEST(CsvParser, RejectsUnterminatedQuotedField) {
+  EXPECT_THROW(static_cast<void>(test::parse_csv("column\r\n\"unterminated\r\n")),
+               std::runtime_error);
+}
+
+TEST(CsvParser, ParsesEscapedQuoteAndQuoteOnlyField) {
+  const auto table = test::parse_csv("first,second\r\n\"\"\"\",\"a\"\"b\"\r\n");
+
+  ASSERT_EQ(table.rows.size(), 1U);
+  ASSERT_EQ(table.rows[0].size(), 2U);
+  EXPECT_EQ(table.rows[0][0], "\"");
+  EXPECT_EQ(table.rows[0][1], "a\"b");
 }
 
 TEST(Csv, RejectsNonfiniteValuesBeforeWritingHeader) {
