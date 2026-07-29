@@ -45,6 +45,13 @@ target_link_libraries(netft_cli_output PUBLIC netft_core netft_cli_options)
 netft_enable_warnings(netft_cli_output)
 netft_enable_sanitizers(netft_cli_output)
 
+add_library(netft_cli_commands src/commands/info.cpp)
+target_compile_features(netft_cli_commands PUBLIC cxx_std_17)
+target_include_directories(netft_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(netft_cli_commands PUBLIC netft_cli_output)
+netft_enable_warnings(netft_cli_commands)
+netft_enable_sanitizers(netft_cli_commands)
+
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   find_package(GTest REQUIRED)
@@ -101,6 +108,18 @@ if(BUILD_TESTING)
     netft_enable_sanitizers(netft_${test_name}_test)
     add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
   endforeach()
+
+  add_executable(netft_info_test test/unit/info_command_test.cpp)
+  target_compile_features(netft_info_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_info_test PRIVATE
+    netft_cli_commands
+    netft_cli_output
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_info_test)
+  netft_enable_sanitizers(netft_info_test)
+  add_test(NAME netft_info COMMAND netft_info_test)
 
   add_test(
     NAME sync_core
