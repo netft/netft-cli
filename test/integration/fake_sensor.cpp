@@ -240,43 +240,46 @@ class FakeSensor::Implementation {
 public:
   explicit Implementation(double rate_hz)
       : interval_(std::chrono::duration<double>{1.0 / rate_hz}) {
-    udp_socket_ = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (!valid(udp_socket_)) {
-      throw std::runtime_error("failed to create fake RDT socket");
-    }
-    bind_loopback(udp_socket_, SOCK_DGRAM);
-    rdt_port_ = bound_port(udp_socket_);
-    if (!set_nonblocking(udp_socket_)) {
-      close_socket(udp_socket_);
-      throw std::runtime_error("failed to configure fake RDT socket");
-    }
+    try {
+      udp_socket_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+      if (!valid(udp_socket_)) {
+        throw std::runtime_error("failed to create fake RDT socket");
+      }
+      bind_loopback(udp_socket_, SOCK_DGRAM);
+      rdt_port_ = bound_port(udp_socket_);
+      if (!set_nonblocking(udp_socket_)) {
+        throw std::runtime_error("failed to configure fake RDT socket");
+      }
 
-    http_listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (!valid(http_listener_)) {
-      close_socket(udp_socket_);
-      throw std::runtime_error("failed to create fake HTTP socket");
-    }
-    const int reuse = 1;
+      http_listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
+      if (!valid(http_listener_)) {
+        throw std::runtime_error("failed to create fake HTTP socket");
+      }
+      const int reuse = 1;
 #ifdef _WIN32
-    static_cast<void>(::setsockopt(http_listener_, SOL_SOCKET, SO_REUSEADDR,
-                                   reinterpret_cast<const char *>(&reuse), sizeof(reuse)));
+      static_cast<void>(::setsockopt(http_listener_, SOL_SOCKET, SO_REUSEADDR,
+                                     reinterpret_cast<const char *>(&reuse), sizeof(reuse)));
 #else
-    static_cast<void>(
-        ::setsockopt(http_listener_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)));
+      static_cast<void>(
+          ::setsockopt(http_listener_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)));
 #endif
-    bind_loopback(http_listener_, SOCK_STREAM);
-    if (::listen(http_listener_, 8) != 0) {
-      close_socket(http_listener_);
-      close_socket(udp_socket_);
-      throw std::runtime_error("failed to listen on fake HTTP socket");
-    }
-    http_port_ = bound_port(http_listener_);
+      bind_loopback(http_listener_, SOCK_STREAM);
+      if (::listen(http_listener_, 8) != 0) {
+        throw std::runtime_error("failed to listen on fake HTTP socket");
+      }
+      http_port_ = bound_port(http_listener_);
 
-    udp_thread_ = std::thread([this] { run_udp(); });
-    http_thread_ = std::thread([this] { run_http(); });
+      udp_thread_ = std::thread([this] { run_udp(); });
+      http_thread_ = std::thread([this] { run_http(); });
+    } catch (...) {
+      shutdown();
+      throw;
+    }
   }
 
-  ~Implementation() {
+  ~Implementation() { shutdown(); }
+
+  void shutdown() noexcept {
     stopping_.store(true, std::memory_order_release);
     shutdown_socket(udp_socket_);
     shutdown_socket(http_listener_);

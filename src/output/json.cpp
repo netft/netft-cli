@@ -92,7 +92,7 @@ void append_string(std::string &output, std::string_view value) {
     throw AppError{ExitCode::Io, "invalid UTF-8 output value"};
   }
 
-  constexpr char hex[] = "0123456789abcdef";
+  constexpr std::string_view hex{"0123456789abcdef"};
   output.push_back('"');
   for (const unsigned char character : value) {
     switch (character) {

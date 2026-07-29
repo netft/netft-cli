@@ -30,5 +30,8 @@ configure = "cmake -S . -B build -G Ninja -DBUILD_TESTING=ON"
 build = { cmd = "cmake --build build", depends-on = ["configure"] }
 test = { cmd = "ctest --test-dir build --output-on-failure", depends-on = ["build"] }
 format-check = "git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format --dry-run --Werror"
-tidy = "cmake -S . -B build/tidy -G Ninja -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && clang-tidy -p build/tidy --config-file=.clang-tidy $(git ls-files 'core/netft/src/*.cpp' 'core/netft/src/detail/*.cpp' 'src/*.cpp' ':!core/netft/src/detail/udp_transport_windows.cpp')"
-check = { cmd = "true", depends-on = ["snapshot-check", "format-check", "build", "test", "tidy"] }
+tidy = "cmake -S . -B build/tidy -G Ninja -DBUILD_TESTING=OFF -DNETFT_CLANG_TIDY=ON && cmake --build build/tidy"
+check = { cmd = "true", depends-on = ["snapshot-check", "format-check", "test", "tidy"] }
+hardware-test = { cmd = "NETFT_ALLOW_BIAS=0 python test/hardware/hardware_test.py", depends-on = ["build"] }
+hardware-bias-test = { cmd = "NETFT_ALLOW_BIAS=1 python test/hardware/hardware_test.py", depends-on = ["build"] }
+sanitizers = "cmake -S . -B build/sanitizers -G Ninja -DBUILD_TESTING=ON -DNETFT_SANITIZERS=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build build/sanitizers && ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitizers --output-on-failure"

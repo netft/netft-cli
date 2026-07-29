@@ -64,6 +64,7 @@ class FakeSensor:
         self.host = "127.0.0.1"
         self._period = 1.0 / rate_hz
         self._stop = threading.Event()
+        self._closed = False
         self._enabled = threading.Event()
         self._enabled.set()
         self._condition = threading.Condition()
@@ -72,6 +73,7 @@ class FakeSensor:
         self._rdt_sequence = 0
         self._ft_sequence = 1000
         self._skip = 0
+        self._status = 0
         self._records: Deque[bytes] = deque()
         self._start_realtime_count = 0
         self._stop_streaming_count = 0
@@ -91,8 +93,12 @@ class FakeSensor:
         self.http_port = self._http.server_address[1]
         self._udp_thread = threading.Thread(target=self._run_udp, daemon=True)
         self._http_thread = threading.Thread(target=self._http.serve_forever, daemon=True)
-        self._udp_thread.start()
-        self._http_thread.start()
+        try:
+            self._udp_thread.start()
+            self._http_thread.start()
+        except BaseException:
+            self._close_resources()
+            raise
 
     def __enter__(self) -> FakeSensor:
         return self
@@ -102,14 +108,21 @@ class FakeSensor:
         self.close()
 
     def close(self) -> None:
-        if self._stop.is_set():
+        if self._closed:
             return
+        self._close_resources()
+
+    def _close_resources(self) -> None:
+        self._closed = True
         self._stop.set()
-        self._http.shutdown()
+        if self._http_thread.is_alive():
+            self._http.shutdown()
         self._http.server_close()
         self._udp.close()
-        self._udp_thread.join(timeout=2.0)
-        self._http_thread.join(timeout=2.0)
+        if self._udp_thread.is_alive():
+            self._udp_thread.join(timeout=2.0)
+        if self._http_thread.is_alive():
+            self._http_thread.join(timeout=2.0)
 
     @property
     def start_realtime_count(self) -> int:
@@ -140,6 +153,10 @@ class FakeSensor:
     def skip_records(self, count: int) -> None:
         with self._condition:
             self._skip += count
+
+    def set_status(self, status: int) -> None:
+        with self._condition:
+            self._status = status
 
     def queue_record(
         self,
@@ -218,7 +235,7 @@ class FakeSensor:
                 "!IIIiiiiii",
                 self._rdt_sequence,
                 self._ft_sequence,
-                0,
+                self._status,
                 100,
                 -200,
                 300,

@@ -5,6 +5,13 @@ project(netft_cli VERSION 0.1.0 LANGUAGES CXX)
 include(CTest)
 
 option(NETFT_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
+option(NETFT_CLANG_TIDY "Run clang-tidy while compiling project targets" OFF)
+
+if(NETFT_CLANG_TIDY)
+  find_program(NETFT_CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
+  set(CMAKE_CXX_CLANG_TIDY
+      "${NETFT_CLANG_TIDY_EXECUTABLE};--config-file=${CMAKE_CURRENT_SOURCE_DIR}/.clang-tidy")
+endif()
 
 find_package(Threads REQUIRED)
 find_package(CURL 7.63.0 REQUIRED)
@@ -225,4 +232,13 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test/tools/test_sync_core.py" -q
   )
   set_tests_properties(sync_core PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  add_test(
+    NAME netft_cli_process
+    COMMAND
+      "${CMAKE_COMMAND}" -E env "NETFT_EXECUTABLE=$<TARGET_FILE:netft>"
+      "${Python3_EXECUTABLE}" -m pytest
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/integration/process_test.py" -q
+  )
+  set_tests_properties(netft_cli_process PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

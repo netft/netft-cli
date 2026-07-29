@@ -44,7 +44,7 @@ public:
     });
   }
   void stop() noexcept override { client_.stop(); }
-  netft::HealthSnapshot health() const override { return client_.health(); }
+  [[nodiscard]] netft::HealthSnapshot health() const override { return client_.health(); }
 
 private:
   std::mutex callback_gate_;

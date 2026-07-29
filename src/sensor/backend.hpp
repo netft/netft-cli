@@ -17,7 +17,7 @@ public:
   virtual void start(Callback callback) = 0;
   // Returns only after callback delivery is quiescent; no callback may begin after it returns.
   virtual void stop() noexcept = 0;
-  virtual netft::HealthSnapshot health() const = 0;
+  [[nodiscard]] virtual netft::HealthSnapshot health() const = 0;
 };
 
 class SensorBackend {

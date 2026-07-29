@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 #include <string>
-#include <utility>
+#include <string_view>
 
 namespace netft_cli {
 
@@ -17,10 +17,10 @@ enum class ExitCode {
 
 class AppError : public std::runtime_error {
 public:
-  AppError(ExitCode code, std::string message)
-      : std::runtime_error(std::move(message)), code_(code) {}
+  AppError(ExitCode code, std::string_view message)
+      : std::runtime_error(std::string{message}), code_(code) {}
 
-  ExitCode code() const noexcept { return code_; }
+  [[nodiscard]] ExitCode code() const noexcept { return code_; }
 
 private:
   ExitCode code_;

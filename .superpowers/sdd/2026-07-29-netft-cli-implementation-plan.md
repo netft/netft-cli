@@ -18,7 +18,7 @@
 - Do not edit snapshot protocol, transport, discovery, recovery, or sensor-configuration code locally.
 - Require CMake 3.16 and C++17.
 - Use Apache License 2.0 and preserve the synchronized core and curl notices.
-- Do not include `192.168.31.100` or any other local sensor address in source, tests, documentation, logs, or repository configuration.
+- Do not include any local sensor address in source, tests, documentation, logs, or repository configuration.
 - Examples may use only the ATI-documented `192.168.1.1` address.
 - Tests may assert structured fields, types, exit categories, and state transitions, but must not freeze complete help text, diagnostic prose, release prose, or terminal-screen copy.
 - Do not introduce a CLI framework, TUI framework, npm wrapper, Docker image, Homebrew formula, Scoop manifest, or winget manifest.
