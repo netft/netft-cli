@@ -17,6 +17,7 @@ clangxx = "*"
 clang-tools = "*"
 actionlint = "*"
 gcovr = "*"
+make = "*"
 
 [feature.test.dependencies]
 nlohmann_json = "*"

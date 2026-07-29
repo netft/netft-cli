@@ -16,6 +16,20 @@ endif()
 find_package(Threads REQUIRED)
 find_package(CURL 7.63.0 REQUIRED)
 
+if(CURL_USE_STATIC_LIBS)
+  set(_netft_curl_candidates "${CURL_LIBRARY}" ${CURL_LIBRARIES})
+  set(_netft_has_static_curl FALSE)
+  foreach(_netft_curl_candidate IN LISTS _netft_curl_candidates)
+    if(_netft_curl_candidate MATCHES "\\.(a|lib)$")
+      set(_netft_has_static_curl TRUE)
+    endif()
+  endforeach()
+  if(NOT _netft_has_static_curl)
+    message(FATAL_ERROR
+      "CURL_USE_STATIC_LIBS is enabled, but CMake did not resolve a static libcurl")
+  endif()
+endif()
+
 include(cmake/Warnings.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/NetftCore.cmake)
@@ -248,5 +262,13 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_SOURCE_DIR}/test/platform/platform_scripts_test.py" -q
   )
   set_tests_properties(netft_platform_scripts
+                       PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  add_test(
+    NAME netft_release_artifacts
+    COMMAND "${Python3_EXECUTABLE}" -m pytest
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact" -q
+  )
+  set_tests_properties(netft_release_artifacts
                        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

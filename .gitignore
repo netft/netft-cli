@@ -1,5 +1,6 @@
 .worktrees/
 build/
+dist/
 .pixi/
 __pycache__/
 .pytest_cache/
