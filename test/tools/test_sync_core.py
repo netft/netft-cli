@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 from pathlib import Path
 
 import pytest
@@ -39,19 +40,26 @@ def make_tagged_fixture(path: Path, tag: str = "v0.3.0") -> Path:
     run("git", "add", ".", cwd=path)
     run("git", "commit", "-m", "fixture", cwd=path)
     run("git", "tag", tag, cwd=path)
+    run("git", "remote", "add", "origin", "https://github.com/netft/netft-cpp.git", cwd=path)
     return path
 
 
 def synchronized_fixture(path: Path) -> Path:
-    source = make_tagged_fixture(path / "source")
     destination = path / "core"
-    sync_core.sync(source, destination, "v0.3.0")
+    shutil.copytree(Path(__file__).parents[2] / "core" / "netft", destination / "netft")
+    sync_core.write_upstream(destination / "UPSTREAM")
+    sync_core.write_manifest(destination / "netft", destination / "MANIFEST.sha256")
     return destination
 
 
-def test_sync_records_exact_release_and_selected_paths(tmp_path: Path) -> None:
+def test_sync_records_exact_release_and_selected_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = make_tagged_fixture(tmp_path / "source", tag="v0.3.0")
     destination = tmp_path / "core"
+    monkeypatch.setattr(
+        sync_core, "REQUIRED_COMMIT", run("git", "rev-parse", "HEAD", cwd=source), raising=False
+    )
 
     sync_core.sync(source, destination, "v0.3.0")
 
@@ -59,12 +67,18 @@ def test_sync_records_exact_release_and_selected_paths(tmp_path: Path) -> None:
     assert metadata["tag"] == "v0.3.0"
     assert metadata["paths"] == "LICENSE,include,src"
     assert metadata["commit"] == run("git", "rev-parse", "HEAD", cwd=source)
+    assert metadata["repository"] == "https://github.com/netft/netft-cpp.git"
     assert not (destination / "netft" / "app").exists()
     sync_core.verify(destination)
 
 
-def test_sync_rejects_dirty_source_tree(tmp_path: Path) -> None:
+def test_sync_rejects_dirty_source_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = make_tagged_fixture(tmp_path / "source")
+    monkeypatch.setattr(
+        sync_core, "REQUIRED_COMMIT", run("git", "rev-parse", "HEAD", cwd=source)
+    )
     (source / "include" / "netft" / "client.hpp").write_text(
         "#pragma once\n// dirty\n", encoding="utf-8"
     )
@@ -73,13 +87,32 @@ def test_sync_rejects_dirty_source_tree(tmp_path: Path) -> None:
         sync_core.sync(source, tmp_path / "core", "v0.3.0")
 
 
-def test_sync_rejects_source_head_that_differs_from_tag(tmp_path: Path) -> None:
+def test_sync_rejects_source_head_that_differs_from_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = make_tagged_fixture(tmp_path / "source")
+    monkeypatch.setattr(
+        sync_core, "REQUIRED_COMMIT", run("git", "rev-parse", "HEAD", cwd=source)
+    )
     (source / "README.md").write_text("next commit\n", encoding="utf-8")
     run("git", "add", "README.md", cwd=source)
     run("git", "commit", "-m", "after release", cwd=source)
 
     with pytest.raises(SystemExit, match="source HEAD does not match the requested tag"):
+        sync_core.sync(source, tmp_path / "core", "v0.3.0")
+
+
+def test_sync_rejects_unsupported_tag(tmp_path: Path) -> None:
+    source = make_tagged_fixture(tmp_path / "source", tag="v0.3.1")
+
+    with pytest.raises(SystemExit, match="unsupported upstream tag"):
+        sync_core.sync(source, tmp_path / "core", "v0.3.1")
+
+
+def test_sync_rejects_required_tag_at_an_unapproved_commit(tmp_path: Path) -> None:
+    source = make_tagged_fixture(tmp_path / "source")
+
+    with pytest.raises(SystemExit, match="source tag does not match the required commit"):
         sync_core.sync(source, tmp_path / "core", "v0.3.0")
 
 
@@ -89,4 +122,30 @@ def test_verify_rejects_changed_snapshot_file(tmp_path: Path) -> None:
     header.write_text(header.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
     with pytest.raises(SystemExit, match="checksum mismatch"):
+        sync_core.verify(destination)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("repository", "https://example.invalid/netft-cpp.git"),
+        ("tag", "v0.3.1"),
+        ("commit", "0" * 40),
+        ("paths", "LICENSE,include,app"),
+    ],
+)
+def test_verify_rejects_tampered_upstream_metadata(
+    tmp_path: Path, field: str, replacement: str
+) -> None:
+    destination = synchronized_fixture(tmp_path)
+    upstream = destination / "UPSTREAM"
+    metadata = sync_core.read_upstream(upstream)
+    upstream.write_text(
+        upstream.read_text(encoding="utf-8").replace(
+            f"{field}={metadata[field]}", f"{field}={replacement}"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match="invalid upstream provenance"):
         sync_core.verify(destination)

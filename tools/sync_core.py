@@ -9,7 +9,19 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
+REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
+REQUIRED_TAG = "v0.3.0"
+REQUIRED_COMMIT = "46ee05639f818a17c1cfe604d0d77b1feb8f9b2b"
 SELECTED = ("LICENSE", "include", "src")
+
+
+def required_metadata() -> dict[str, str]:
+    return {
+        "repository": REQUIRED_REPOSITORY,
+        "tag": REQUIRED_TAG,
+        "commit": REQUIRED_COMMIT,
+        "paths": ",".join(SELECTED),
+    }
 
 
 def git(source: Path, *args: str) -> str:
@@ -45,10 +57,10 @@ def replace_selected_tree(source: Path, target: Path, selected: Sequence[str]) -
             shutil.copy2(source_path, destination_path)
 
 
-def write_upstream(path: Path, tag: str, commit: str, selected: Sequence[str]) -> None:
+def write_upstream(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        f"tag={tag}\ncommit={commit}\npaths={','.join(selected)}\n", encoding="utf-8"
+        "".join(f"{key}={value}\n" for key, value in required_metadata().items()), encoding="utf-8"
     )
 
 
@@ -65,7 +77,7 @@ def read_upstream(path: Path) -> dict[str, str]:
             raise SystemExit("invalid upstream metadata")
         metadata[key] = value
 
-    required = {"tag", "commit", "paths"}
+    required = {"repository", "tag", "commit", "paths"}
     if set(metadata) != required:
         raise SystemExit("invalid upstream metadata")
     return metadata
@@ -109,7 +121,8 @@ def read_manifest(path: Path) -> dict[str, str]:
 
 def verify(destination: Path = Path("core")) -> None:
     """Exit successfully only when the copied tree exactly matches its manifest."""
-    read_upstream(destination / "UPSTREAM")
+    if read_upstream(destination / "UPSTREAM") != required_metadata():
+        raise SystemExit("invalid upstream provenance")
     root = destination / "netft"
     expected = read_manifest(destination / "MANIFEST.sha256")
     actual = {
@@ -124,13 +137,19 @@ def sync(source: Path, destination: Path, tag: str) -> None:
     """Copy the exact tagged upstream core and record its provenance."""
     source = source.resolve()
     destination = destination.resolve()
+    if tag != REQUIRED_TAG:
+        raise SystemExit("unsupported upstream tag")
+    if git(source, "remote", "get-url", "origin") != REQUIRED_REPOSITORY:
+        raise SystemExit("source repository does not match the required repository")
     commit = git(source, "rev-parse", f"{tag}^{{commit}}")
+    if commit != REQUIRED_COMMIT:
+        raise SystemExit("source tag does not match the required commit")
     if git(source, "rev-parse", "HEAD") != commit:
         raise SystemExit("source HEAD does not match the requested tag")
     if git(source, "status", "--porcelain"):
         raise SystemExit("source repository is dirty")
     replace_selected_tree(source, destination / "netft", SELECTED)
-    write_upstream(destination / "UPSTREAM", tag, commit, SELECTED)
+    write_upstream(destination / "UPSTREAM")
     write_manifest(destination / "netft", destination / "MANIFEST.sha256")
     verify(destination)
 
