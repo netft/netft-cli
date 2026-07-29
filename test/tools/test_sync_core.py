@@ -1,0 +1,92 @@
+"""Behavioral tests for the controlled upstream snapshot tool."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from tools import sync_core
+
+
+def run(*args: str, cwd: Path) -> str:
+    return subprocess.run(
+        args,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def make_tagged_fixture(path: Path, tag: str = "v0.3.0") -> Path:
+    path.mkdir(parents=True)
+    run("git", "init", cwd=path)
+    run("git", "config", "user.name", "Test User", cwd=path)
+    run("git", "config", "user.email", "test@example.com", cwd=path)
+    (path / "LICENSE").write_text("Apache License\n", encoding="utf-8")
+    (path / "include" / "netft").mkdir(parents=True)
+    (path / "include" / "netft" / "client.hpp").write_text(
+        "#pragma once\n", encoding="utf-8"
+    )
+    (path / "src" / "detail").mkdir(parents=True)
+    (path / "src" / "detail" / "protocol.cpp").write_text(
+        "int protocol() { return 0; }\n", encoding="utf-8"
+    )
+    (path / "app").mkdir()
+    (path / "app" / "main.cpp").write_text("int main() {}\n", encoding="utf-8")
+    run("git", "add", ".", cwd=path)
+    run("git", "commit", "-m", "fixture", cwd=path)
+    run("git", "tag", tag, cwd=path)
+    return path
+
+
+def synchronized_fixture(path: Path) -> Path:
+    source = make_tagged_fixture(path / "source")
+    destination = path / "core"
+    sync_core.sync(source, destination, "v0.3.0")
+    return destination
+
+
+def test_sync_records_exact_release_and_selected_paths(tmp_path: Path) -> None:
+    source = make_tagged_fixture(tmp_path / "source", tag="v0.3.0")
+    destination = tmp_path / "core"
+
+    sync_core.sync(source, destination, "v0.3.0")
+
+    metadata = sync_core.read_upstream(destination / "UPSTREAM")
+    assert metadata["tag"] == "v0.3.0"
+    assert metadata["paths"] == "LICENSE,include,src"
+    assert metadata["commit"] == run("git", "rev-parse", "HEAD", cwd=source)
+    assert not (destination / "netft" / "app").exists()
+    sync_core.verify(destination)
+
+
+def test_sync_rejects_dirty_source_tree(tmp_path: Path) -> None:
+    source = make_tagged_fixture(tmp_path / "source")
+    (source / "include" / "netft" / "client.hpp").write_text(
+        "#pragma once\n// dirty\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit, match="source repository is dirty"):
+        sync_core.sync(source, tmp_path / "core", "v0.3.0")
+
+
+def test_sync_rejects_source_head_that_differs_from_tag(tmp_path: Path) -> None:
+    source = make_tagged_fixture(tmp_path / "source")
+    (source / "README.md").write_text("next commit\n", encoding="utf-8")
+    run("git", "add", "README.md", cwd=source)
+    run("git", "commit", "-m", "after release", cwd=source)
+
+    with pytest.raises(SystemExit, match="source HEAD does not match the requested tag"):
+        sync_core.sync(source, tmp_path / "core", "v0.3.0")
+
+
+def test_verify_rejects_changed_snapshot_file(tmp_path: Path) -> None:
+    destination = synchronized_fixture(tmp_path)
+    header = destination / "netft" / "include" / "netft" / "client.hpp"
+    header.write_text(header.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="checksum mismatch"):
+        sync_core.verify(destination)

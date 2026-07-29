@@ -1,0 +1,161 @@
+"""Synchronize and verify the vendored netft-cpp core snapshot."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Sequence
+
+SELECTED = ("LICENSE", "include", "src")
+
+
+def git(source: Path, *args: str) -> str:
+    """Run git in *source* and return its stripped standard output."""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=source,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        message = error.stderr.strip() or error.stdout.strip() or "git command failed"
+        raise SystemExit(message) from error
+    return completed.stdout.strip()
+
+
+def replace_selected_tree(source: Path, target: Path, selected: Sequence[str]) -> None:
+    """Replace *target* with the explicitly selected paths from *source*."""
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+
+    for relative_path in selected:
+        source_path = source / relative_path
+        if not source_path.exists():
+            raise SystemExit(f"source path is missing: {relative_path}")
+        destination_path = target / relative_path
+        if source_path.is_dir():
+            shutil.copytree(source_path, destination_path)
+        else:
+            shutil.copy2(source_path, destination_path)
+
+
+def write_upstream(path: Path, tag: str, commit: str, selected: Sequence[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"tag={tag}\ncommit={commit}\npaths={','.join(selected)}\n", encoding="utf-8"
+    )
+
+
+def read_upstream(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as error:
+        raise SystemExit(f"missing upstream metadata: {path}") from error
+
+    metadata: dict[str, str] = {}
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if not separator or not key or not value:
+            raise SystemExit("invalid upstream metadata")
+        metadata[key] = value
+
+    required = {"tag", "commit", "paths"}
+    if set(metadata) != required:
+        raise SystemExit("invalid upstream metadata")
+    return metadata
+
+
+def digest(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def snapshot_files(root: Path) -> list[Path]:
+    return sorted((path for path in root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
+
+
+def write_manifest(root: Path, manifest: Path) -> None:
+    if not root.is_dir():
+        raise SystemExit(f"missing snapshot tree: {root}")
+    records = [f"{digest(path)}  {path.relative_to(root).as_posix()}" for path in snapshot_files(root)]
+    manifest.write_text("\n".join(records) + ("\n" if records else ""), encoding="utf-8")
+
+
+def read_manifest(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as error:
+        raise SystemExit(f"missing checksum manifest: {path}") from error
+
+    records: dict[str, str] = {}
+    for line in lines:
+        checksum, separator, relative_path = line.partition("  ")
+        if not separator or len(checksum) != 64 or not relative_path:
+            raise SystemExit("invalid checksum manifest")
+        if relative_path in records:
+            raise SystemExit("invalid checksum manifest")
+        records[relative_path] = checksum
+    return records
+
+
+def verify(destination: Path = Path("core")) -> None:
+    """Exit successfully only when the copied tree exactly matches its manifest."""
+    read_upstream(destination / "UPSTREAM")
+    root = destination / "netft"
+    expected = read_manifest(destination / "MANIFEST.sha256")
+    actual = {
+        path.relative_to(root).as_posix(): digest(path)
+        for path in snapshot_files(root)
+    }
+    if expected != actual:
+        raise SystemExit("checksum mismatch")
+
+
+def sync(source: Path, destination: Path, tag: str) -> None:
+    """Copy the exact tagged upstream core and record its provenance."""
+    source = source.resolve()
+    destination = destination.resolve()
+    commit = git(source, "rev-parse", f"{tag}^{{commit}}")
+    if git(source, "rev-parse", "HEAD") != commit:
+        raise SystemExit("source HEAD does not match the requested tag")
+    if git(source, "status", "--porcelain"):
+        raise SystemExit("source repository is dirty")
+    replace_selected_tree(source, destination / "netft", SELECTED)
+    write_upstream(destination / "UPSTREAM", tag, commit, SELECTED)
+    write_manifest(destination / "netft", destination / "MANIFEST.sha256")
+    verify(destination)
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    sync_parser = subcommands.add_parser("sync", help="copy a tagged upstream snapshot")
+    sync_parser.add_argument("--source", type=Path, required=True)
+    sync_parser.add_argument("--tag", required=True)
+    sync_parser.add_argument("--destination", type=Path, default=Path("core"))
+
+    verify_parser = subcommands.add_parser("verify", help="verify the local snapshot manifest")
+    verify_parser.add_argument("--destination", type=Path, default=Path("core"))
+    return parser.parse_args()
+
+
+def main() -> None:
+    arguments = parse_arguments()
+    if arguments.command == "sync":
+        sync(arguments.source, arguments.destination, arguments.tag)
+    else:
+        verify(arguments.destination)
+
+
+if __name__ == "__main__":
+    main()
