@@ -620,7 +620,16 @@ try {
             )
         }
     }
-    [Console]::Error.WriteLine("netft installer: " + $InstallError.Message)
+    $InstallMessages = [Collections.Generic.List[string]]::new()
+    while ($InstallError) {
+        if (-not [string]::IsNullOrWhiteSpace($InstallError.Message)) {
+            $InstallMessages.Add($InstallError.Message)
+        }
+        $InstallError = $InstallError.InnerException
+    }
+    [Console]::Error.WriteLine(
+        "netft installer: " + [string]::Join(" -> ", $InstallMessages)
+    )
     exit 1
 } finally {
     try {

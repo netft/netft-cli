@@ -232,22 +232,28 @@ stream = root / "stream.txt"
 stream_count = root / "stream-count.txt"
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self):
-        with request_log.open("a", encoding="utf-8") as stream:
-            stream.write(self.path + "\n")
+        with request_log.open("a", encoding="utf-8") as request_stream:
+            request_stream.write(self.path + "\n")
         if (
             self.path == "/releases/download/v0.1.0/SHA256SUMS"
             and redirect.exists()
         ):
             self.send_response(302)
             self.send_header("Location", redirect.read_text(encoding="utf-8"))
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
             self.end_headers()
+            self.close_connection = True
             return
         if (
             self.path == "/releases/download/v0.1.0/SHA256SUMS"
             and stream.exists()
         ):
             self.send_response(200)
+            self.send_header("Connection", "close")
             self.end_headers()
             sent = 0
             try:
@@ -259,6 +265,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     stream_count.write_text(str(sent), encoding="utf-8")
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            self.close_connection = True
             return
         relative = urllib.parse.unquote(self.path.split("?", 1)[0]).lstrip("/")
         path = (root / relative).resolve()
@@ -268,8 +275,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
+        self.close_connection = True
 
     def log_message(self, *_args):
         pass
@@ -303,13 +312,27 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     $env:NETFT_CLI_RELEASE_BASE_URL = $BaseUrl
     $env:NETFT_CLI_TEST_USER_PATH_FILE = Join-Path $Temporary "user-path.txt"
     $env:LOCALAPPDATA = Join-Path $Temporary "local-app-data"
+    $RedirectFile = Join-Path $FixtureRoot "redirect.txt"
+    $RequestLog = Join-Path $FixtureRoot "requests.log"
 
     $CustomBin = Join-Path $Temporary "custom bin"
     $Explicit = Invoke-InstallerProcess -Arguments @(
         "-Version", "v0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
+    $RequestDiagnostics = if (Test-Path -LiteralPath $RequestLog) {
+        "requests: " + [string]::Join(
+            ", ",
+            [IO.File]::ReadAllLines($RequestLog)
+        )
+    } else {
+        ""
+    }
+    $ExplicitDiagnostics = @(
+        $Explicit.Output,
+        $RequestDiagnostics
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     Assert-True ($Explicit.ExitCode -eq 0) (
-        "Explicit install failed: $($Explicit.Output)"
+        "Explicit install failed: " + [string]::Join(" | ", $ExplicitDiagnostics)
     )
     Assert-True (-not (Test-Path -LiteralPath $env:NETFT_CLI_TEST_USER_PATH_FILE)) `
         "-NoModifyPath unexpectedly changed the user PATH fixture."
@@ -323,8 +346,6 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         $InstalledVersion[0] -ceq "netft 0.1.0"
     ) "Installed executable reported the wrong version."
 
-    $RedirectFile = Join-Path $FixtureRoot "redirect.txt"
-    $RequestLog = Join-Path $FixtureRoot "requests.log"
     $RedirectedDirectory = Join-Path $FixtureRoot "releases\redirected"
     New-Item -ItemType Directory -Path $RedirectedDirectory -Force |
         Out-Null
