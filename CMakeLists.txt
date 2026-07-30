@@ -56,6 +56,7 @@ add_library(netft_cli_stream
   src/platform/clock.cpp
   src/platform/interrupt.cpp
   src/stream/acquisition.cpp
+  src/stream/health_collector.cpp
   src/stream/latest_sample.cpp
 )
 target_compile_features(netft_cli_stream PUBLIC cxx_std_17)
@@ -89,6 +90,16 @@ target_link_libraries(netft_cli_output PUBLIC netft_core netft_cli_cli)
 netft_enable_warnings(netft_cli_output)
 netft_enable_sanitizers(netft_cli_output)
 
+add_library(netft_cli_diagnostics
+  src/diagnostics/criteria.cpp
+  src/diagnostics/result.cpp
+)
+target_compile_features(netft_cli_diagnostics PUBLIC cxx_std_17)
+target_include_directories(netft_cli_diagnostics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(netft_cli_diagnostics PUBLIC netft_cli_stream)
+netft_enable_warnings(netft_cli_diagnostics)
+netft_enable_sanitizers(netft_cli_diagnostics)
+
 add_library(netft_cli_commands
   src/commands/bias.cpp
   src/commands/info.cpp
@@ -98,6 +109,7 @@ target_compile_features(netft_cli_commands PUBLIC cxx_std_17)
 target_include_directories(netft_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(netft_cli_commands PUBLIC
   netft_cli_output
+  netft_cli_diagnostics
   netft_cli_sensor
   netft_cli_stream
 )
@@ -256,6 +268,28 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_acquisition_test)
   netft_enable_sanitizers(netft_acquisition_test)
   add_test(NAME netft_acquisition COMMAND netft_acquisition_test)
+
+  add_executable(netft_health_collector_test test/unit/health_collector_test.cpp)
+  target_compile_features(netft_health_collector_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_health_collector_test PRIVATE
+    netft_cli_stream
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_health_collector_test)
+  netft_enable_sanitizers(netft_health_collector_test)
+  add_test(NAME netft_health_collector COMMAND netft_health_collector_test)
+
+  add_executable(netft_diagnostic_criteria_test test/unit/diagnostic_criteria_test.cpp)
+  target_compile_features(netft_diagnostic_criteria_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_diagnostic_criteria_test PRIVATE
+    netft_cli_diagnostics
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_diagnostic_criteria_test)
+  netft_enable_sanitizers(netft_diagnostic_criteria_test)
+  add_test(NAME netft_diagnostic_criteria COMMAND netft_diagnostic_criteria_test)
 
   add_executable(netft_line_reader_test test/unit/line_reader_test.cpp)
   target_compile_features(netft_line_reader_test PRIVATE cxx_std_17)
