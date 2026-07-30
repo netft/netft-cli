@@ -33,7 +33,7 @@ jobs:
             exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
-          test "${version}" = "0.1.0"
+          test "${version}" = "0.2.0"
 
           test "$(git cat-file -t "${GITHUB_REF_NAME}")" = tag
           git fetch --no-tags origin \

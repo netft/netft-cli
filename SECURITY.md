@@ -6,7 +6,7 @@ Security fixes are provided for the latest published release and the `main` bran
 
 | Version | Supported |
 | --- | --- |
-| 0.1.x | Yes |
+| 0.2.x | Yes |
 | Older releases | No |
 
 ## Report a vulnerability

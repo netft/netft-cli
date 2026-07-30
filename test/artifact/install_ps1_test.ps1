@@ -203,9 +203,9 @@ try {
     Assert-True (
         $LASTEXITCODE -eq 0 -and
         $ProductionVersion.Count -eq 1 -and
-        $ProductionVersion[0] -ceq "netft 0.1.0"
-    ) "NETFT_EXECUTABLE is not the production 0.1.0 executable."
-    Publish-Release "0.1.0" $GoodBinary
+        $ProductionVersion[0] -ceq "netft 0.2.0"
+    ) "NETFT_EXECUTABLE is not the production 0.2.0 executable."
+    Publish-Release "0.2.0" $GoodBinary
 
     $Listener = [Net.Sockets.TcpListener]::new(
         [Net.IPAddress]::Loopback,
@@ -238,7 +238,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with request_log.open("a", encoding="utf-8") as request_stream:
             request_stream.write(self.path + "\n")
         if (
-            self.path == "/releases/download/v0.1.0/SHA256SUMS"
+            self.path == "/releases/download/v0.2.0/SHA256SUMS"
             and redirect.exists()
         ):
             self.send_response(302)
@@ -249,7 +249,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
             return
         if (
-            self.path == "/releases/download/v0.1.0/SHA256SUMS"
+            self.path == "/releases/download/v0.2.0/SHA256SUMS"
             and stream.exists()
         ):
             self.send_response(200)
@@ -317,7 +317,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
     $CustomBin = Join-Path $Temporary "custom bin"
     $Explicit = Invoke-InstallerProcess -Arguments @(
-        "-Version", "v0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "v0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     $RequestDiagnostics = if (Test-Path -LiteralPath $RequestLog) {
         "requests: " + [string]::Join(
@@ -343,14 +343,14 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     Assert-True (
         $LASTEXITCODE -eq 0 -and
         $InstalledVersion.Count -eq 1 -and
-        $InstalledVersion[0] -ceq "netft 0.1.0"
+        $InstalledVersion[0] -ceq "netft 0.2.0"
     ) "Installed executable reported the wrong version."
 
     $RedirectedDirectory = Join-Path $FixtureRoot "releases\redirected"
     New-Item -ItemType Directory -Path $RedirectedDirectory -Force |
         Out-Null
     Copy-Item -LiteralPath (
-        Join-Path $FixtureRoot "releases\download\v0.1.0\SHA256SUMS"
+        Join-Path $FixtureRoot "releases\download\v0.2.0\SHA256SUMS"
     ) -Destination (Join-Path $RedirectedDirectory "SHA256SUMS")
     [IO.File]::WriteAllText(
         $RedirectFile,
@@ -358,7 +358,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     )
     [IO.File]::WriteAllText($RequestLog, "")
     $SameOriginRedirect = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     $SameOriginRequests = @(
         [IO.File]::ReadAllLines($RequestLog) |
@@ -368,7 +368,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         $SameOriginRedirect.ExitCode -eq 0 -and
         $SameOriginRequests.Count -ge 2 -and
         $SameOriginRequests[0] -ceq
-            "/releases/download/v0.1.0/SHA256SUMS" -and
+            "/releases/download/v0.2.0/SHA256SUMS" -and
         $SameOriginRequests[1] -ceq "/releases/redirected/SHA256SUMS"
     ) "An exact same-origin loopback redirect was not followed."
     Remove-Item -LiteralPath $RedirectFile -Force
@@ -399,26 +399,26 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     ) "The default LOCALAPPDATA destination was not installed."
 
     [IO.File]::WriteAllText($Installed, "previous")
-    $ReleaseDirectory = Join-Path $FixtureRoot "releases\download\v0.1.0"
+    $ReleaseDirectory = Join-Path $FixtureRoot "releases\download\v0.2.0"
     $ReleaseArchive = Join-Path $ReleaseDirectory (
-        "netft-cli-0.1.0-windows-x86_64.zip"
+        "netft-cli-0.2.0-windows-x86_64.zip"
     )
     [IO.File]::AppendAllText($ReleaseArchive, "corrupt")
     $ChecksumFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($ChecksumFailure.ExitCode -ne 0) `
         "A checksum mismatch was accepted."
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "A failed checksum update replaced the previous executable."
 
-    Publish-Release "0.1.0" $GoodBinary
+    Publish-Release "0.2.0" $GoodBinary
     $StreamFlag = Join-Path $FixtureRoot "stream.txt"
     $StreamCount = Join-Path $FixtureRoot "stream-count.txt"
     [IO.File]::WriteAllText($StreamFlag, "")
     Remove-Item -LiteralPath $StreamCount -Force -ErrorAction SilentlyContinue
     $StreamFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Remove-Item -LiteralPath $StreamFlag -Force
     $Transferred = [long][IO.File]::ReadAllText($StreamCount)
@@ -429,18 +429,18 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "An oversized checksum response replaced the previous executable."
 
-    Publish-Release "0.1.0" $GoodBinary -Unexpected
+    Publish-Release "0.2.0" $GoodBinary -Unexpected
     $ArchiveFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($ArchiveFailure.ExitCode -ne 0) `
         "An archive with an unexpected payload was accepted."
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "A failed archive update replaced the previous executable."
 
-    Publish-Release "0.1.0" $GoodBinary -Symlink
+    Publish-Release "0.2.0" $GoodBinary -Symlink
     $SymlinkFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($SymlinkFailure.ExitCode -ne 0) `
         "A symbolic-link archive member was accepted."
@@ -456,12 +456,12 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "A failed version check replaced the previous executable."
 
-    Publish-Release "0.1.0" $GoodBinary
+    Publish-Release "0.2.0" $GoodBinary
     $ChecksumPath = Join-Path $ReleaseDirectory "SHA256SUMS"
     $FirstChecksum = [IO.File]::ReadAllLines($ChecksumPath)[0]
     [IO.File]::AppendAllText($ChecksumPath, "$FirstChecksum`n")
     $DuplicateFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($DuplicateFailure.ExitCode -ne 0) `
         "A duplicate checksum entry was accepted."
@@ -469,30 +469,30 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         "A rejected checksum inventory replaced the previous executable."
 
     $UnsafeVersion = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0;invalid", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0;invalid", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($UnsafeVersion.ExitCode -ne 0) `
         "An unsafe version was accepted."
 
-    Publish-Release "0.1.0" $GoodBinary -Oversized
+    Publish-Release "0.2.0" $GoodBinary -Oversized
     $OversizedFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($OversizedFailure.ExitCode -ne 0) `
         "An oversized ZIP member was accepted."
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "An oversized archive replaced the previous executable."
 
-    Publish-Release "0.1.0" $GoodBinary -Oversized -ForgedLength
+    Publish-Release "0.2.0" $GoodBinary -Oversized -ForgedLength
     $ForgedLengthFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($ForgedLengthFailure.ExitCode -ne 0) `
         "A ZIP member with forged length metadata was accepted."
     Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
         "A forged archive replaced the previous executable."
 
-    Publish-Release "0.1.0" $GoodBinary
+    Publish-Release "0.2.0" $GoodBinary
     $LockPath = Join-Path $CustomBin ".netft-install.lock"
     $HeldLock = [IO.FileStream]::new(
         $LockPath,
@@ -502,7 +502,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     )
     try {
         $LockFailure = Invoke-InstallerProcess -Arguments @(
-            "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+            "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
         )
     } finally {
         $HeldLock.Dispose()
@@ -516,7 +516,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     New-Item -ItemType Directory -Path $BrokenPathStore | Out-Null
     $env:NETFT_CLI_TEST_USER_PATH_FILE = $BrokenPathStore
     $PathFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin
+        "-Version", "0.2.0", "-BinDir", $CustomBin
     )
     Assert-True ($PathFailure.ExitCode -ne 0) `
         "A failed user PATH update was reported as success."
@@ -531,7 +531,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     Remove-Item -LiteralPath $Installed -Force
     New-Item -ItemType Directory -Path $Installed | Out-Null
     $DirectoryFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True (
         $DirectoryFailure.ExitCode -ne 0 -and
@@ -544,7 +544,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     New-Item -ItemType Junction -Path $Installed -Target $JunctionTarget |
         Out-Null
     $ReparseFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
     Assert-True ($ReparseFailure.ExitCode -ne 0) `
         "A reparse-point destination was replaced."
@@ -561,7 +561,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     New-Item -ItemType Junction -Path $JunctionBin -Target $RealBin |
         Out-Null
     $BinReparseFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $JunctionBin, "-NoModifyPath"
+        "-Version", "0.2.0", "-BinDir", $JunctionBin, "-NoModifyPath"
     )
     Assert-True (
         $BinReparseFailure.ExitCode -ne 0 -and
@@ -571,7 +571,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     $OverrideDestination = Join-Path $Temporary "override-destination"
     $env:NETFT_CLI_RELEASE_BASE_URL = "https://github.com/netft/netft-cli/releases"
     $OverrideFailure = Invoke-InstallerProcess -Arguments @(
-        "-Version", "0.1.0", "-BinDir", $OverrideDestination,
+        "-Version", "0.2.0", "-BinDir", $OverrideDestination,
         "-NoModifyPath"
     )
     Assert-True (
@@ -590,7 +590,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         [IO.File]::WriteAllText($RedirectFile, $RedirectLocation)
         [IO.File]::WriteAllText($RequestLog, "")
         $RedirectFailure = Invoke-InstallerProcess -Arguments @(
-            "-Version", "0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
+            "-Version", "0.2.0", "-BinDir", $CustomBin, "-NoModifyPath"
         )
         $Requests = @(
             [IO.File]::ReadAllLines($RequestLog) |
@@ -599,7 +599,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         Assert-True (
             $RedirectFailure.ExitCode -ne 0 -and
             $Requests.Count -eq 1 -and
-            $Requests[0] -ceq "/releases/download/v0.1.0/SHA256SUMS"
+            $Requests[0] -ceq "/releases/download/v0.2.0/SHA256SUMS"
         ) "A loopback release redirect escaped its origin."
     }
     Remove-Item -LiteralPath $RedirectFile -Force
