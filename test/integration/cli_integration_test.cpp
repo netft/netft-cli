@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -26,6 +28,8 @@ public:
   Confirmation &confirmation() override { return confirmation_; }
   InterruptFlag &interrupt() override { return interrupt_; }
   Clock &clock() override { return clock_; }
+  WallClock &wall_clock() override { return wall_clock_; }
+  Filesystem &filesystem() override { return filesystem_; }
   EnvironmentMap environment() const override { return environment_; }
 
   int show_help(const ShowHelp &) override {
@@ -52,6 +56,8 @@ private:
   AcceptConfirmation confirmation_;
   InterruptFlag interrupt_;
   SystemClock clock_;
+  SystemWallClock wall_clock_;
+  NativeFilesystem filesystem_;
   EnvironmentMap environment_;
 };
 
@@ -118,6 +124,30 @@ TEST(CliIntegration, CheckProducesOneTypedResultAndStopsStreaming) {
   EXPECT_TRUE(document.at("checks").is_array());
   EXPECT_TRUE(sensor.wait_for_stop_streaming());
   EXPECT_TRUE(environment.stderr_text().empty());
+}
+
+TEST(CliIntegration, RecordWritesEveryAcceptedSampleAndFinalizesFile) {
+  const auto path = std::filesystem::path(testing::TempDir()) / "netft-cli-integration.ndjson";
+  std::error_code error;
+  std::filesystem::remove(path, error);
+  std::filesystem::remove(path.string() + ".partial", error);
+  FakeSensor sensor;
+  IntegrationEnvironment environment;
+  auto arguments = connection_arguments("record", sensor);
+  arguments.insert(arguments.end(),
+                   {"--output", path.string(), "--count", "5", "--format", "ndjson", "--quiet"});
+
+  ASSERT_EQ(run_cli(arguments, environment), 0);
+  std::ifstream stream(path, std::ios::binary);
+  const std::string contents{std::istreambuf_iterator<char>{stream},
+                             std::istreambuf_iterator<char>{}};
+  const auto documents = parse_ndjson(contents);
+  EXPECT_EQ(documents.size(), 5U);
+  EXPECT_TRUE(sensor.wait_for_stop_streaming());
+  EXPECT_FALSE(std::filesystem::exists(path.string() + ".partial"));
+  EXPECT_TRUE(environment.stdout_text().empty());
+  EXPECT_TRUE(environment.stderr_text().empty());
+  EXPECT_TRUE(std::filesystem::remove(path));
 }
 
 TEST(CliIntegration, ResolvesEnvironmentAndPropagatesTerminalOptions) {

@@ -49,8 +49,11 @@ void FakeSession::start(Callback callback) {
   if (!samples_.empty() && before_first_sample_) {
     before_first_sample_();
   }
-  for (const auto &sample : samples_) {
-    callback_(sample);
+  for (std::size_t index = 0; index < samples_.size(); ++index) {
+    callback_(samples_[index]);
+    if (after_sample_) {
+      after_sample_(index + 1);
+    }
   }
 }
 

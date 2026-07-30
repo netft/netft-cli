@@ -28,6 +28,7 @@ public:
   void set_before_first_sample(std::function<void()> hook) {
     before_first_sample_ = std::move(hook);
   }
+  void set_after_sample(std::function<void(std::size_t)> hook) { after_sample_ = std::move(hook); }
 
   std::size_t start_calls() const noexcept { return start_calls_; }
   std::size_t stop_calls() const noexcept { return stop_calls_; }
@@ -42,6 +43,7 @@ private:
   std::vector<netft::Sample> held_backlog_;
   std::vector<std::string> startup_events_;
   std::function<void()> before_first_sample_;
+  std::function<void(std::size_t)> after_sample_;
   Callback callback_;
   netft::HealthSnapshot health_;
   std::size_t start_calls_{};

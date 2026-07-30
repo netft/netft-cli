@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import os
 from pathlib import Path
 import signal
@@ -250,6 +251,42 @@ def test_check_acceptance_failure_keeps_json_on_stdout() -> None:
     document = json.loads(result.stdout)
     assert document["schema_version"] == 1
     assert document["result"] == "fail"
+
+
+@pytest.mark.parametrize("suffix", [".csv", ".ndjson"])
+def test_record_finalizes_parseable_machine_files(tmp_path: Path, suffix: str) -> None:
+    destination = tmp_path / f"capture{suffix}"
+    with FakeSensor() as sensor:
+        result = run_process(
+            "record",
+            sensor.host,
+            "--http-port",
+            str(sensor.http_port),
+            "--rdt-port",
+            str(sensor.rdt_port),
+            "--output",
+            str(destination),
+            "--count",
+            "5",
+            "--quiet",
+        )
+    assert result.returncode == 0
+    assert not result.stdout
+    assert not result.stderr
+    assert destination.is_file()
+    assert not Path(f"{destination}.partial").exists()
+    if suffix == ".csv":
+        with destination.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        assert len(rows) == 5
+        assert all(row["schema_version"] == "1" for row in rows)
+    else:
+        records = [
+            json.loads(line)
+            for line in destination.read_text(encoding="utf-8").splitlines()
+        ]
+        assert len(records) == 5
+        assert all(record["schema_version"] == 1 for record in records)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal process assertion")

@@ -13,6 +13,7 @@ enum class ExitCode {
   Sensor = 5,
   Io = 6,
   Acceptance = 7,
+  Recording = 8,
   Interrupted = 130,
 };
 

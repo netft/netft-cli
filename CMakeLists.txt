@@ -105,12 +105,17 @@ add_library(netft_cli_recording
   src/recording/csv_writer.cpp
   src/recording/ndjson_writer.cpp
   src/recording/output_file.cpp
+  src/recording/recorder.cpp
   src/recording/writer.cpp
   src/platform/filesystem.cpp
 )
 target_compile_features(netft_cli_recording PUBLIC cxx_std_17)
 target_include_directories(netft_cli_recording PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(netft_cli_recording PUBLIC netft_cli_output)
+target_link_libraries(netft_cli_recording PUBLIC
+  netft_cli_output
+  netft_cli_sensor
+  netft_cli_stream
+)
 netft_enable_warnings(netft_cli_recording)
 netft_enable_sanitizers(netft_cli_recording)
 
@@ -119,12 +124,14 @@ add_library(netft_cli_commands
   src/commands/check.cpp
   src/commands/info.cpp
   src/commands/monitor.cpp
+  src/commands/record.cpp
 )
 target_compile_features(netft_cli_commands PUBLIC cxx_std_17)
 target_include_directories(netft_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(netft_cli_commands PUBLIC
   netft_cli_output
   netft_cli_diagnostics
+  netft_cli_recording
   netft_cli_sensor
   netft_cli_stream
 )
@@ -339,6 +346,17 @@ if(BUILD_TESTING)
   netft_enable_sanitizers(netft_output_file_test)
   add_test(NAME netft_output_file COMMAND netft_output_file_test)
 
+  add_executable(netft_recorder_test test/unit/recorder_test.cpp)
+  target_compile_features(netft_recorder_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_recorder_test PRIVATE
+    netft_cli_recording
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_recorder_test)
+  netft_enable_sanitizers(netft_recorder_test)
+  add_test(NAME netft_recorder COMMAND netft_recorder_test)
+
   add_executable(netft_line_reader_test test/unit/line_reader_test.cpp)
   target_compile_features(netft_line_reader_test PRIVATE cxx_std_17)
   target_link_libraries(netft_line_reader_test PRIVATE
@@ -397,6 +415,18 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_check_test)
   netft_enable_sanitizers(netft_check_test)
   add_test(NAME netft_check COMMAND netft_check_test)
+
+  add_executable(netft_record_test test/unit/record_command_test.cpp)
+  target_compile_features(netft_record_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_record_test PRIVATE
+    netft_cli_commands
+    netft_cli_recording
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_record_test)
+  netft_enable_sanitizers(netft_record_test)
+  add_test(NAME netft_record COMMAND netft_record_test)
 
   if(NOT WIN32)
     add_executable(netft_udp_port_isolation_test test/unit/udp_port_isolation_test.cpp)

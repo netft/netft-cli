@@ -6,6 +6,7 @@
 #include "commands/check.hpp"
 #include "commands/info.hpp"
 #include "commands/monitor.hpp"
+#include "commands/record.hpp"
 #include "config/resolver.hpp"
 #include "platform/line_reader.hpp"
 #include "sensor/netft_backend.hpp"
@@ -91,6 +92,8 @@ public:
   InterruptFlag interrupt;
   InterruptHandler interrupt_handler;
   SystemClock clock;
+  SystemWallClock wall_clock;
+  NativeFilesystem filesystem;
   std::unique_ptr<InterruptibleLineReader> line_reader;
   TerminalConfirmation confirmation;
 };
@@ -108,6 +111,10 @@ Confirmation &NativeEnvironment::confirmation() { return implementation_->confir
 InterruptFlag &NativeEnvironment::interrupt() { return implementation_->interrupt; }
 
 Clock &NativeEnvironment::clock() { return implementation_->clock; }
+
+WallClock &NativeEnvironment::wall_clock() { return implementation_->wall_clock; }
+
+Filesystem &NativeEnvironment::filesystem() { return implementation_->filesystem; }
 
 EnvironmentMap NativeEnvironment::environment() const { return read_process_environment(); }
 
@@ -151,6 +158,12 @@ int run_application(const std::vector<std::string_view> &arguments, AppEnvironme
                    environment.output().terminal = value.terminal;
                    return run_check(value, environment.backend(), environment.output(),
                                     environment.interrupt(), environment.clock());
+                 },
+                 [&](const RecordOptions &value) {
+                   environment.output().terminal = value.terminal;
+                   return run_record(value, environment.backend(), environment.output(),
+                                     environment.interrupt(), environment.clock(),
+                                     environment.wall_clock(), environment.filesystem());
                  },
                  [&](const BiasOptions &value) {
                    environment.output().terminal = value.terminal;

@@ -5,6 +5,7 @@
 #include "output/confirmation.hpp"
 #include "output/context.hpp"
 #include "platform/clock.hpp"
+#include "platform/filesystem.hpp"
 #include "platform/interrupt.hpp"
 #include "sensor/backend.hpp"
 
@@ -23,6 +24,8 @@ public:
   virtual Confirmation &confirmation() = 0;
   virtual InterruptFlag &interrupt() = 0;
   virtual Clock &clock() = 0;
+  virtual WallClock &wall_clock() = 0;
+  virtual Filesystem &filesystem() = 0;
   [[nodiscard]] virtual EnvironmentMap environment() const { return {}; }
   virtual int show_help(const ShowHelp &help) = 0;
   virtual int show_version() = 0;
@@ -43,6 +46,8 @@ public:
   Confirmation &confirmation() override;
   InterruptFlag &interrupt() override;
   Clock &clock() override;
+  WallClock &wall_clock() override;
+  Filesystem &filesystem() override;
   [[nodiscard]] EnvironmentMap environment() const override;
   int show_help(const ShowHelp &help) override;
   int show_version() override;
