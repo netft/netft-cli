@@ -244,27 +244,30 @@ jobs:
         run: |
           set -euo pipefail
           metadata="${RUNNER_TEMP}/release-metadata.json"
+          release_pages="${RUNNER_TEMP}/release-pages.json"
           asset_ids="${RUNNER_TEMP}/release-asset-ids"
-          if ! release_api_url="$(
-            gh release view "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --json apiUrl \
-              --jq .apiUrl \
-              2>/dev/null
-          )"; then
-            gh release create "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --verify-tag \
-              --draft \
-              --notes-file release/RELEASE_NOTES.md
-            release_api_url="$(
-              gh release view "${GITHUB_REF_NAME}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --json apiUrl \
-                --jq .apiUrl
-            )"
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            >"${release_pages}"
+          release_api_url="$(
+            RELEASE_TAG="${GITHUB_REF_NAME}" \
+              python3 -c \
+                'import json, os, sys; pages=json.load(sys.stdin); matches=[release for page in pages for release in page if release.get("tag_name")==os.environ["RELEASE_TAG"]]; len(matches)<=1 or sys.exit("duplicate release tag"); (not matches or matches[0].get("draft") is True) or sys.exit("release is already published"); print(matches[0]["url"] if matches else "")' \
+                <"${release_pages}"
+          )"
+          if [[ -n "${release_api_url}" ]]; then
+            gh api "${release_api_url}" >"${metadata}"
+          else
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${GITHUB_REF_NAME}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              -f name="${GITHUB_REF_NAME}" \
+              -F draft=true \
+              -F prerelease=false \
+              -f body="$(cat release/RELEASE_NOTES.md)" \
+              >"${metadata}"
           fi
-          gh api "${release_api_url}" >"${metadata}"
           release_id="$(
             python3 tools/release_inventory.py release-id \
               --metadata "${metadata}"
