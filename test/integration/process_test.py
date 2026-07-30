@@ -84,7 +84,7 @@ def test_monitor_timeout_is_stream_error() -> None:
             "--timeout",
             "50ms",
             "--duration",
-            "100ms",
+            "500ms",
             "--format",
             "ndjson",
         )

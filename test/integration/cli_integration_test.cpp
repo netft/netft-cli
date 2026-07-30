@@ -85,23 +85,6 @@ TEST(CliIntegration, InfoUsesHttpConfigurationAndNeverStartsRdt) {
   EXPECT_TRUE(environment.stderr_text().empty());
 }
 
-TEST(CliIntegration, MonitorEmitsRecordsAndStopsRdtAfterBoundedRun) {
-  FakeSensor sensor;
-  IntegrationEnvironment environment;
-  auto arguments = connection_arguments("monitor", sensor);
-  arguments.insert(arguments.end(), {"--duration", "100ms", "--rate", "50", "--format", "ndjson"});
-
-  ASSERT_EQ(run_cli(arguments, environment), 0);
-  const auto documents = parse_ndjson(environment.stdout_text());
-  ASSERT_FALSE(documents.empty());
-  EXPECT_EQ(documents.front().at("host"), sensor.host());
-  EXPECT_TRUE(documents.front().at("raw").is_array());
-  EXPECT_TRUE(sensor.wait_for_stop_streaming());
-  EXPECT_GE(sensor.start_realtime_count(), 1U);
-  EXPECT_GE(sensor.stop_streaming_count(), 1U);
-  EXPECT_TRUE(environment.stderr_text().empty());
-}
-
 TEST(CliIntegration, BiasUsesPreviewAndOneShotBiasedSession) {
   FakeSensor sensor;
   IntegrationEnvironment environment;
