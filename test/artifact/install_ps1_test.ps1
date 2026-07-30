@@ -308,7 +308,9 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     $Explicit = Invoke-InstallerProcess -Arguments @(
         "-Version", "v0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
-    Assert-True ($Explicit.ExitCode -eq 0) "Explicit install failed."
+    Assert-True ($Explicit.ExitCode -eq 0) (
+        "Explicit install failed: $($Explicit.Output)"
+    )
     Assert-True (-not (Test-Path -LiteralPath $env:NETFT_CLI_TEST_USER_PATH_FILE)) `
         "-NoModifyPath unexpectedly changed the user PATH fixture."
     $Installed = Join-Path $CustomBin "netft.exe"
