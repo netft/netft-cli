@@ -5,6 +5,7 @@
 #include "commands/bias.hpp"
 #include "commands/info.hpp"
 #include "commands/monitor.hpp"
+#include "config/resolver.hpp"
 #include "platform/line_reader.hpp"
 #include "sensor/netft_backend.hpp"
 
@@ -74,8 +75,12 @@ void write_command_help(std::ostream &stream, const std::string &topic) {
 class NativeEnvironment::Implementation {
 public:
   Implementation()
-      : output{std::cin, std::cout, std::cerr, is_terminal(standard_input_descriptor),
-               is_terminal(standard_output_descriptor)},
+      : output{std::cin,
+               std::cout,
+               std::cerr,
+               is_terminal(standard_input_descriptor),
+               is_terminal(standard_output_descriptor),
+               {}},
         interrupt_handler{interrupt},
         line_reader{make_interruptible_line_reader(standard_input_descriptor)},
         confirmation{output, interrupt, *line_reader} {}
@@ -103,6 +108,8 @@ InterruptFlag &NativeEnvironment::interrupt() { return implementation_->interrup
 
 Clock &NativeEnvironment::clock() { return implementation_->clock; }
 
+EnvironmentMap NativeEnvironment::environment() const { return read_process_environment(); }
+
 int NativeEnvironment::show_help(const ShowHelp &help) {
   if (help.topic == "general") {
     write_general_help(implementation_->output.standard_output);
@@ -126,18 +133,21 @@ int NativeEnvironment::show_version() {
 }
 
 int run_application(const std::vector<std::string_view> &arguments, AppEnvironment &environment) {
-  const auto action = parse_arguments(arguments);
+  const auto action = resolve_options(parse_arguments(arguments), environment.environment());
   return std::visit(
       Overloaded{[&](const ShowHelp &value) { return environment.show_help(value); },
                  [&](const ShowVersion &) { return environment.show_version(); },
                  [&](const InfoOptions &value) {
+                   environment.output().terminal = value.terminal;
                    return run_info(value, environment.backend(), environment.output());
                  },
                  [&](const MonitorOptions &value) {
+                   environment.output().terminal = value.terminal;
                    return run_monitor(value, environment.backend(), environment.output(),
                                       environment.interrupt(), environment.clock());
                  },
                  [&](const BiasOptions &value) {
+                   environment.output().terminal = value.terminal;
                    return run_bias(value, environment.backend(), environment.output(),
                                    environment.confirmation(), environment.interrupt());
                  },

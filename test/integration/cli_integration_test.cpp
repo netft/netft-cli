@@ -26,6 +26,7 @@ public:
   Confirmation &confirmation() override { return confirmation_; }
   InterruptFlag &interrupt() override { return interrupt_; }
   Clock &clock() override { return clock_; }
+  EnvironmentMap environment() const override { return environment_; }
 
   int show_help(const ShowHelp &) override {
     standard_output_ << "help\n";
@@ -39,16 +40,19 @@ public:
 
   std::string stdout_text() const { return standard_output_.str(); }
   std::string stderr_text() const { return standard_error_.str(); }
+  const TerminalOptions &terminal_options() const { return output_.terminal; }
+  void set_environment(EnvironmentMap environment) { environment_ = std::move(environment); }
 
 private:
   std::istringstream input_;
   std::ostringstream standard_output_;
   std::ostringstream standard_error_;
-  OutputContext output_{input_, standard_output_, standard_error_, false, false};
+  OutputContext output_{input_, standard_output_, standard_error_, false, false, {}};
   NetftBackend backend_;
   AcceptConfirmation confirmation_;
   InterruptFlag interrupt_;
   SystemClock clock_;
+  EnvironmentMap environment_;
 };
 
 std::string port_text(int port) { return std::to_string(port); }
@@ -99,6 +103,20 @@ TEST(CliIntegration, BiasUsesPreviewAndOneShotBiasedSession) {
   EXPECT_GE(sensor.start_realtime_count(), 2U);
   EXPECT_TRUE(sensor.wait_for_stop_streaming(2));
   EXPECT_TRUE(environment.stderr_text().empty());
+}
+
+TEST(CliIntegration, ResolvesEnvironmentAndPropagatesTerminalOptions) {
+  FakeSensor sensor;
+  IntegrationEnvironment environment;
+  environment.set_environment({{"NETFT_HOST", sensor.host()},
+                               {"NETFT_HTTP_PORT", port_text(sensor.http_port())},
+                               {"NETFT_RDT_PORT", port_text(sensor.rdt_port())},
+                               {"NETFT_TIMEOUT", "500ms"}});
+
+  ASSERT_EQ(run_cli({"--verbose", "--color", "always", "info"}, environment), 0);
+  EXPECT_EQ(environment.terminal_options().verbosity, Verbosity::Verbose);
+  EXPECT_EQ(environment.terminal_options().color, ColorMode::Always);
+  EXPECT_GE(sensor.http_request_count(), 1U);
 }
 
 } // namespace

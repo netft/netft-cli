@@ -19,7 +19,10 @@ enum class OptionId {
   MinRate,
   MaxLoss,
   MaxReconnects,
-  Count
+  Count,
+  Verbose,
+  Quiet,
+  Color
 };
 
 enum class PositionalId { Host, Shell };

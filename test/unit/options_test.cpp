@@ -147,7 +147,7 @@ TEST(Options, RejectsUrlInsteadOfHost) {
 
 TEST(Options, RejectsDuplicateHostAndUnknownOptions) {
   expect_usage_error({"info", "sensor.local", "other.local"});
-  expect_usage_error({"info", "sensor.local", "--verbose"});
+  expect_usage_error({"info", "sensor.local", "--unknown"});
 }
 
 TEST(Options, ProducesGeneralAndCommandHelpTopics) {

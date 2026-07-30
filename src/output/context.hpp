@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cli/options.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <istream>
@@ -14,6 +16,7 @@ struct OutputContext {
   std::ostream &standard_error;
   bool input_is_terminal{};
   bool output_is_terminal{};
+  TerminalOptions terminal;
 };
 
 class OutputHandle {

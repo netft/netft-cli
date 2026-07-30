@@ -40,8 +40,8 @@ TEST(Json, EmitsOneCompleteObjectPerNdjsonLine) {
 }
 
 TEST(Json, EmitsNestedConfigurationCalibration) {
-  const ConnectionOptions options{"sensor.example", 8080, 49153,
-                                  std::chrono::duration<double>{0.5}};
+  const ConnectionOptions options{
+      "sensor.example", 8080, 49153, std::chrono::duration<double>{0.5}, {}};
   std::ostringstream stream;
   write_json(stream, make_configuration_record(options, test::configuration()));
   const auto document = test::parse_json(stream.str());
@@ -55,8 +55,8 @@ TEST(Json, EmitsNestedConfigurationCalibration) {
 
 TEST(Json, EmitsBiasBeforeAndAfterDocuments) {
   std::ostringstream stream;
-  const ConnectionOptions options{"sensor.example", 8080, 49153,
-                                  std::chrono::duration<double>{0.5}};
+  const ConnectionOptions options{
+      "sensor.example", 8080, 49153, std::chrono::duration<double>{0.5}, {}};
   write_json(stream, BiasRecord{make_configuration_record(options, test::configuration()),
                                 test::sample_record(41), test::sample_record(42)});
   const auto document = test::parse_json(stream.str());

@@ -7,7 +7,8 @@ namespace netft_cli {
 namespace {
 
 std::vector<OptionId> with_connection(std::initializer_list<OptionId> command_options) {
-  std::vector<OptionId> options{OptionId::HttpPort, OptionId::RdtPort, OptionId::Timeout};
+  std::vector<OptionId> options{OptionId::Verbose,  OptionId::Quiet,   OptionId::Color,
+                                OptionId::HttpPort, OptionId::RdtPort, OptionId::Timeout};
   options.insert(options.end(), command_options.begin(), command_options.end());
   return options;
 }
@@ -62,7 +63,7 @@ CommandSchema make_schema() {
                "completion",
                "netft completion SHELL",
                "Generate a shell completion script.",
-               {},
+               {OptionId::Verbose, OptionId::Quiet, OptionId::Color},
                {PositionalId::Shell},
                {"netft completion bash", "netft completion powershell"},
                {0, 2}},
@@ -90,6 +91,14 @@ CommandSchema make_schema() {
                false,
                {}},
               {OptionId::Count, "count", '\0', OptionValueType::PositiveInteger, false, {}},
+              {OptionId::Verbose, "verbose", 'v', OptionValueType::Flag, false, {}},
+              {OptionId::Quiet, "quiet", 'q', OptionValueType::Flag, false, {}},
+              {OptionId::Color,
+               "color",
+               '\0',
+               OptionValueType::Choice,
+               false,
+               {"auto", "always", "never"}},
           },
           {
               {PositionalId::Host, "HOST", OptionValueType::Host, false, {}},

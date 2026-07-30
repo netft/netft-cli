@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cli/options.hpp"
+#include "config/environment.hpp"
 #include "output/confirmation.hpp"
 #include "output/context.hpp"
 #include "platform/clock.hpp"
@@ -22,6 +23,7 @@ public:
   virtual Confirmation &confirmation() = 0;
   virtual InterruptFlag &interrupt() = 0;
   virtual Clock &clock() = 0;
+  [[nodiscard]] virtual EnvironmentMap environment() const { return {}; }
   virtual int show_help(const ShowHelp &help) = 0;
   virtual int show_version() = 0;
 };
@@ -41,6 +43,7 @@ public:
   Confirmation &confirmation() override;
   InterruptFlag &interrupt() override;
   Clock &clock() override;
+  [[nodiscard]] EnvironmentMap environment() const override;
   int show_help(const ShowHelp &help) override;
   int show_version() override;
 

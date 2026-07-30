@@ -13,8 +13,8 @@ namespace netft_cli {
 namespace {
 
 TEST(Records, ConstructsConfigurationFromDeviceDiscovery) {
-  const ConnectionOptions options{"sensor.example", 8080, 49153,
-                                  std::chrono::duration<double>{0.5}};
+  const ConnectionOptions options{
+      "sensor.example", 8080, 49153, std::chrono::duration<double>{0.5}, {}};
   const auto record = make_configuration_record(options, test::configuration());
 
   EXPECT_EQ(record.host, "sensor.example");

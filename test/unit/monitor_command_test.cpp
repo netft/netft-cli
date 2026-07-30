@@ -421,7 +421,7 @@ TEST(MonitorCommand, MapsOutputFailureToIoAndStopsSession) {
   std::ostringstream standard_output;
   std::ostringstream standard_error;
   standard_output.setstate(std::ios::badbit);
-  OutputContext output{input, standard_output, standard_error, false, false};
+  OutputContext output{input, standard_output, standard_error, false, false, {}};
   InterruptFlag interrupt;
 
   test::expect_app_error(ExitCode::Io, [&] {

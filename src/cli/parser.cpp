@@ -4,6 +4,7 @@
 #include "cli/schema.hpp"
 #include "platform/clock.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -35,6 +36,16 @@ const OptionSpec &find_option(std::string_view name) {
   const auto &schema = command_schema();
   for (const auto &option : schema.options) {
     if (option.long_name == name) {
+      return option;
+    }
+  }
+  usage_error("Unknown option");
+}
+
+const OptionSpec &find_short_option(char name) {
+  const auto &schema = command_schema();
+  for (const auto &option : schema.options) {
+    if (option.short_name == name) {
       return option;
     }
   }
@@ -203,8 +214,9 @@ ParsedCommand parse_command(const std::vector<std::string_view> &arguments,
     if (argument == "--help") {
       usage_error("Help must be handled before command parsing");
     }
-    if (argument.rfind("--", 0) == 0) {
-      const auto &option = find_option(argument.substr(2));
+    if (argument.rfind("--", 0) == 0 || (argument.size() == 2 && argument.front() == '-')) {
+      const auto &option = argument.rfind("--", 0) == 0 ? find_option(argument.substr(2))
+                                                        : find_short_option(argument[1]);
       if (!spec.accepts(option.id)) {
         usage_error("Option is not available for this command");
       }
@@ -220,7 +232,10 @@ ParsedCommand parse_command(const std::vector<std::string_view> &arguments,
       parsed.positionals.emplace_back(argument);
     }
   }
-  if (parsed.positionals.size() != spec.positionals.size()) {
+  const auto required = static_cast<std::size_t>(
+      std::count_if(spec.positionals.begin(), spec.positionals.end(),
+                    [](PositionalId id) { return command_schema().positional(id).required; }));
+  if (parsed.positionals.size() < required || parsed.positionals.size() > spec.positionals.size()) {
     usage_error("Command has the wrong number of positional arguments");
   }
   return parsed;
@@ -228,16 +243,22 @@ ParsedCommand parse_command(const std::vector<std::string_view> &arguments,
 
 ConnectionOptions connection_from(const ParsedCommand &parsed) {
   ConnectionOptions connection;
-  connection.host = parsed.positionals.front();
-  validate_host(connection.host);
+  if (!parsed.positionals.empty()) {
+    connection.host = parsed.positionals.front();
+    connection.explicit_values.host = true;
+    validate_host(connection.host);
+  }
   if (const auto value = parsed.value(OptionId::HttpPort)) {
     connection.http_port = parse_port(*value);
+    connection.explicit_values.http_port = true;
   }
   if (const auto value = parsed.value(OptionId::RdtPort)) {
     connection.rdt_port = parse_port(*value);
+    connection.explicit_values.rdt_port = true;
   }
   if (const auto value = parsed.value(OptionId::Timeout)) {
     connection.timeout = parse_duration(*value);
+    connection.explicit_values.timeout = true;
   }
   return connection;
 }
@@ -249,6 +270,36 @@ OutputFormat format_from(const ParsedCommand &parsed) {
     usage_error("Output format is not supported by this command");
   }
   return format;
+}
+
+ColorMode parse_color(std::string_view value) {
+  if (value == "auto") {
+    return ColorMode::Automatic;
+  }
+  if (value == "always") {
+    return ColorMode::Always;
+  }
+  if (value == "never") {
+    return ColorMode::Never;
+  }
+  usage_error("Unknown color mode");
+}
+
+TerminalOptions terminal_from(const ParsedCommand &parsed) {
+  if (parsed.has(OptionId::Verbose) && parsed.has(OptionId::Quiet)) {
+    usage_error("Verbose and quiet modes are mutually exclusive");
+  }
+  TerminalOptions terminal;
+  if (parsed.has(OptionId::Verbose)) {
+    terminal.verbosity = Verbosity::Verbose;
+  } else if (parsed.has(OptionId::Quiet)) {
+    terminal.verbosity = Verbosity::Quiet;
+  }
+  if (const auto value = parsed.value(OptionId::Color)) {
+    terminal.color = parse_color(*value);
+    terminal.color_explicit = true;
+  }
+  return terminal;
 }
 
 std::optional<std::filesystem::path> optional_output_from(const ParsedCommand &parsed) {
@@ -274,42 +325,79 @@ CompletionShell completion_shell(std::string_view value) {
   usage_error("Unknown completion shell");
 }
 
+std::vector<std::string_view>
+normalize_global_options(const std::vector<std::string_view> &arguments) {
+  std::vector<std::string_view> normalized;
+  std::vector<std::string_view> prefix;
+  std::size_t index{};
+  while (index < arguments.size()) {
+    const auto argument = arguments[index];
+    if (argument == "--verbose" || argument == "--quiet" || argument == "-v" || argument == "-q") {
+      prefix.push_back(argument);
+      ++index;
+      continue;
+    }
+    if (argument == "--color") {
+      prefix.push_back(argument);
+      if (++index == arguments.size()) {
+        usage_error("Option requires a value");
+      }
+      prefix.push_back(arguments[index]);
+      ++index;
+      continue;
+    }
+    break;
+  }
+  if (prefix.empty()) {
+    return arguments;
+  }
+  if (index == arguments.size()) {
+    usage_error("Command is required");
+  }
+  normalized.insert(normalized.end(), arguments.begin() + static_cast<std::ptrdiff_t>(index),
+                    arguments.end());
+  normalized.insert(normalized.end(), prefix.begin(), prefix.end());
+  return normalized;
+}
+
 } // namespace
 
 Action parse_arguments(const std::vector<std::string_view> &arguments) {
-  if (arguments.empty()) {
+  const auto normalized = normalize_global_options(arguments);
+  if (normalized.empty()) {
     return ShowHelp{"general"};
   }
-  if (arguments.front() == "--help") {
-    if (arguments.size() != 1) {
+  if (normalized.front() == "--help") {
+    if (normalized.size() != 1) {
       usage_error("General help does not take arguments");
     }
     return ShowHelp{"general"};
   }
-  if (arguments.front() == "--version") {
-    if (arguments.size() != 1) {
+  if (normalized.front() == "--version") {
+    if (normalized.size() != 1) {
       usage_error("Version does not take arguments");
     }
     return ShowVersion{};
   }
-  if (arguments.front() == "help") {
-    if (arguments.size() == 1) {
+  if (normalized.front() == "help") {
+    if (normalized.size() == 1) {
       return ShowHelp{"general"};
     }
-    if (arguments.size() == 2) {
-      return help_for(arguments[1]);
+    if (normalized.size() == 2) {
+      return help_for(normalized[1]);
     }
     usage_error("Help takes at most one topic");
   }
 
-  const auto &spec = find_command(arguments.front());
-  if (arguments.size() == 2 && arguments[1] == "--help") {
+  const auto &spec = find_command(normalized.front());
+  if (normalized.size() == 2 && normalized[1] == "--help") {
     return help_for(spec.name);
   }
-  const auto parsed = parse_command(arguments, spec);
+  const auto parsed = parse_command(normalized, spec);
+  const auto terminal = terminal_from(parsed);
 
   if (spec.id == CommandId::Completion) {
-    return CompletionOptions{completion_shell(parsed.positionals.front())};
+    return CompletionOptions{completion_shell(parsed.positionals.front()), terminal};
   }
 
   const auto connection = connection_from(parsed);
@@ -317,7 +405,7 @@ Action parse_arguments(const std::vector<std::string_view> &arguments) {
   const auto output = optional_output_from(parsed);
 
   if (spec.id == CommandId::Info) {
-    return InfoOptions{connection, format, output};
+    return InfoOptions{connection, format, output, terminal};
   }
   if (spec.id == CommandId::Monitor) {
     double rate_hz = 20.0;
@@ -333,13 +421,14 @@ Action parse_arguments(const std::vector<std::string_view> &arguments) {
     if (const auto value = parsed.value(OptionId::Duration)) {
       duration = parse_duration(*value);
     }
-    return MonitorOptions{connection, format, output, rate_hz, duration};
+    return MonitorOptions{connection, format, output, rate_hz, duration, terminal};
   }
   if (spec.id == CommandId::Check) {
     CheckOptions check;
     check.connection = connection;
     check.format = format;
     check.output = output;
+    check.terminal = terminal;
     if (const auto value = parsed.value(OptionId::Duration)) {
       check.duration = parse_duration(*value);
     }
@@ -366,6 +455,7 @@ Action parse_arguments(const std::vector<std::string_view> &arguments) {
     record.connection = connection;
     record.format = format;
     record.output = *output;
+    record.terminal = terminal;
     if (const auto value = parsed.value(OptionId::Duration)) {
       record.duration = parse_duration(*value);
     }
@@ -374,7 +464,7 @@ Action parse_arguments(const std::vector<std::string_view> &arguments) {
     }
     return record;
   }
-  return BiasOptions{connection, format, output, parsed.has(OptionId::Yes)};
+  return BiasOptions{connection, format, output, parsed.has(OptionId::Yes), terminal};
 }
 
 } // namespace netft_cli

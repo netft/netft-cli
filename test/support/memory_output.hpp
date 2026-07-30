@@ -14,8 +14,8 @@ public:
 
   MemoryOutput(std::string input, bool input_is_terminal, bool output_is_terminal)
       : input_(std::move(input)),
-        context_{input_, standard_output_, standard_error_, input_is_terminal, output_is_terminal} {
-  }
+        context_{input_, standard_output_, standard_error_, input_is_terminal, output_is_terminal,
+                 {}} {}
 
   OutputContext &context() noexcept { return context_; }
   std::string standard_output_text() const { return standard_output_.str(); }
