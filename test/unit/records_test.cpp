@@ -62,9 +62,11 @@ TEST(OutputHandle, OwnsBinaryModeFileAndFlushesData) {
     output.flush();
   }
 
-  std::ifstream input(path, std::ios::binary);
-  const std::string contents{std::istreambuf_iterator<char>{input},
-                             std::istreambuf_iterator<char>{}};
+  std::string contents;
+  {
+    std::ifstream input(path, std::ios::binary);
+    contents.assign(std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{});
+  }
   std::filesystem::remove(path);
   EXPECT_EQ(contents, "a\r\nb");
 }

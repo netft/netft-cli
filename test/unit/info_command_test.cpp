@@ -65,9 +65,11 @@ TEST(InfoCommand, UsesJsonForAutomaticFormatWhenWritingToFile) {
   test::MemoryOutput output(true);
 
   EXPECT_EQ(run_info(options, backend, output.context()), 0);
-  std::ifstream stream(path);
-  const std::string document{std::istreambuf_iterator<char>{stream},
-                             std::istreambuf_iterator<char>{}};
+  std::string document;
+  {
+    std::ifstream stream(path);
+    document.assign(std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{});
+  }
   EXPECT_TRUE(test::parse_json(document).contains("calibration"));
   EXPECT_TRUE(output.standard_output_text().empty());
   EXPECT_TRUE(std::filesystem::remove(path));

@@ -108,9 +108,11 @@ jobs:
               throw "Native command failed with exit code $LASTEXITCODE."
             }
           }
+          $python = (Get-Command python).Source
           cmake -S . -B build/native `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            "-DPython3_EXECUTABLE=$python" `
             -DBUILD_TESTING=ON
           Assert-NativeSuccess
           cmake --build build/native --config Release
