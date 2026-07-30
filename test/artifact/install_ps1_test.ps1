@@ -520,8 +520,12 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     )
     Assert-True ($PathFailure.ExitCode -ne 0) `
         "A failed user PATH update was reported as success."
-    Assert-True ([IO.File]::ReadAllText($Installed) -ceq "previous") `
-        "A failed user PATH update did not roll back the executable."
+    Assert-True (
+        [IO.File]::ReadAllText($Installed) -ceq "previous"
+    ) (
+        "A failed user PATH update did not roll back the executable. " +
+        "Installer output: $($PathFailure.Output)"
+    )
     $env:NETFT_CLI_TEST_USER_PATH_FILE = $PathFile
 
     Remove-Item -LiteralPath $Installed -Force

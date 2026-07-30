@@ -217,6 +217,54 @@ function Assert-ChecksumContract {
     }
 }
 
+function Initialize-Crc32Type {
+    if ($null -ne ("NetftInstaller.Crc32" -as [type])) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+namespace NetftInstaller
+{
+    public sealed class Crc32
+    {
+        private static readonly uint[] Table = CreateTable();
+        private uint state = 0xffffffffU;
+
+        public void Append(byte[] buffer, int count)
+        {
+            for (var index = 0; index < count; ++index)
+            {
+                state = Table[(int)((state ^ buffer[index]) & 0xffU)] ^
+                    (state >> 8);
+            }
+        }
+
+        public uint Value
+        {
+            get { return ~state; }
+        }
+
+        private static uint[] CreateTable()
+        {
+            var table = new uint[256];
+            for (var index = 0; index < table.Length; ++index)
+            {
+                var value = (uint)index;
+                for (var bit = 0; bit < 8; ++bit)
+                {
+                    value = (value & 1U) != 0
+                        ? 0xedb88320U ^ (value >> 1)
+                        : value >> 1;
+                }
+                table[index] = value;
+            }
+            return table;
+        }
+    }
+}
+'@
+}
+
 function Expand-CheckedZip {
     param(
         [Parameter(Mandatory = $true)][string]$Archive,
@@ -229,6 +277,7 @@ function Expand-CheckedZip {
         throw "Release archive exceeds its size limit."
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Initialize-Crc32Type
     $Root = "netft-cli-$ReleaseVersion"
     $Expected = @(
         "$Root/LICENSE",
@@ -277,6 +326,7 @@ function Expand-CheckedZip {
                 )
                 try {
                     $MemberLength = [long]0
+                    $Crc32 = [NetftInstaller.Crc32]::new()
                     $Buffer = [byte[]]::new(65536)
                     while (($Read = $InputStream.Read(
                         $Buffer,
@@ -290,6 +340,7 @@ function Expand-CheckedZip {
                             $MaxExpandedBytes) {
                             throw "Release archive exceeds its expanded size limit."
                         }
+                        $Crc32.Append($Buffer, $Read)
                         $OutputStream.Write($Buffer, 0, $Read)
                         $MemberLength += $Read
                         $ActualExpandedLength += $Read
@@ -302,6 +353,9 @@ function Expand-CheckedZip {
             }
             if ($MemberLength -ne $Entry.Length) {
                 throw "Release archive member length does not match its metadata."
+            }
+            if ($Crc32.Value -ne $Entry.Crc32) {
+                throw "Release archive member CRC does not match its metadata."
             }
         }
     } finally {
@@ -598,7 +652,13 @@ try {
         try {
             if ($HadPreviousBinary -and $Backup -and
                 (Test-Path -LiteralPath $Backup -PathType Leaf)) {
-                [IO.File]::Replace($Backup, $Destination, $null, $true)
+                $FailedReplacement = Join-Path $Temporary "netft.exe.failed"
+                [IO.File]::Replace(
+                    $Backup,
+                    $Destination,
+                    $FailedReplacement,
+                    $true
+                )
             } elseif (-not $HadPreviousBinary -and
                 (Test-Path -LiteralPath $Destination -PathType Leaf)) {
                 Remove-Item -LiteralPath $Destination -Force
