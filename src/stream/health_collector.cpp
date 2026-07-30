@@ -17,6 +17,7 @@ HealthCollector::HealthCollector(Clock::TimePoint start, netft::HealthSnapshot b
     : start_(start), baseline_(std::move(baseline)) {}
 
 void HealthCollector::observe(const netft::Sample &sample) noexcept {
+  std::scoped_lock lock(mutex_);
   ++sample_count_;
   last_status_ = sample.status;
   if (sample.status != 0) {
@@ -26,6 +27,7 @@ void HealthCollector::observe(const netft::Sample &sample) noexcept {
 
 StreamHealth HealthCollector::finish(Clock::TimePoint end,
                                      const netft::HealthSnapshot &final) const noexcept {
+  std::scoped_lock lock(mutex_);
   const auto elapsed = std::max(Clock::Duration::zero(), end - start_);
   const double elapsed_seconds = std::chrono::duration<double>{elapsed}.count();
   return {

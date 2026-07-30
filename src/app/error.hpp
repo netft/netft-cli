@@ -12,6 +12,7 @@ enum class ExitCode {
   Stream = 4,
   Sensor = 5,
   Io = 6,
+  Acceptance = 7,
   Interrupted = 130,
 };
 

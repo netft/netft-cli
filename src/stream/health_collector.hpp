@@ -5,6 +5,7 @@
 #include <netft/types.hpp>
 
 #include <cstdint>
+#include <mutex>
 
 namespace netft_cli {
 
@@ -34,6 +35,7 @@ public:
 private:
   Clock::TimePoint start_;
   netft::HealthSnapshot baseline_;
+  mutable std::mutex mutex_;
   std::uint64_t sample_count_{};
   std::uint64_t nonzero_status_count_{};
   std::uint32_t last_status_{};

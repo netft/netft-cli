@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diagnostics/result.hpp"
 #include "output/records.hpp"
 #include "platform/terminal.hpp"
 
@@ -9,6 +10,7 @@ namespace netft_cli {
 
 std::string render_configuration_text(const ConfigurationRecord &record);
 std::string render_bias_text(const BiasRecord &record);
+std::string render_diagnostic_text(const DiagnosticResult &result);
 
 class TerminalMonitor {
 public:

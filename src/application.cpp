@@ -3,6 +3,7 @@
 #include "app/error.hpp"
 #include "cli/parser.hpp"
 #include "commands/bias.hpp"
+#include "commands/check.hpp"
 #include "commands/info.hpp"
 #include "commands/monitor.hpp"
 #include "config/resolver.hpp"
@@ -145,6 +146,11 @@ int run_application(const std::vector<std::string_view> &arguments, AppEnvironme
                    environment.output().terminal = value.terminal;
                    return run_monitor(value, environment.backend(), environment.output(),
                                       environment.interrupt(), environment.clock());
+                 },
+                 [&](const CheckOptions &value) {
+                   environment.output().terminal = value.terminal;
+                   return run_check(value, environment.backend(), environment.output(),
+                                    environment.interrupt(), environment.clock());
                  },
                  [&](const BiasOptions &value) {
                    environment.output().terminal = value.terminal;

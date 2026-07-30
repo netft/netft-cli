@@ -102,6 +102,7 @@ netft_enable_sanitizers(netft_cli_diagnostics)
 
 add_library(netft_cli_commands
   src/commands/bias.cpp
+  src/commands/check.cpp
   src/commands/info.cpp
   src/commands/monitor.cpp
 )
@@ -337,6 +338,18 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_bias_test)
   netft_enable_sanitizers(netft_bias_test)
   add_test(NAME netft_bias COMMAND netft_bias_test)
+
+  add_executable(netft_check_test test/unit/check_command_test.cpp)
+  target_compile_features(netft_check_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_check_test PRIVATE
+    netft_cli_commands
+    netft_cli_output
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_check_test)
+  netft_enable_sanitizers(netft_check_test)
+  add_test(NAME netft_check COMMAND netft_check_test)
 
   if(NOT WIN32)
     add_executable(netft_udp_port_isolation_test test/unit/udp_port_isolation_test.cpp)

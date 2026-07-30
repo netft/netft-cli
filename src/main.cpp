@@ -26,6 +26,8 @@ std::string_view category(netft_cli::ExitCode code) noexcept {
     return "sensor";
   case ExitCode::Io:
     return "io";
+  case ExitCode::Acceptance:
+    return "acceptance";
   case ExitCode::Interrupted:
     return "interrupted";
   }

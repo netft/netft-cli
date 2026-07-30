@@ -22,4 +22,12 @@ inline BiasOptions bias_options(bool assume_yes) {
   return {connection_options(), OutputFormat::Json, std::nullopt, assume_yes, {}};
 }
 
+inline CheckOptions check_options() {
+  CheckOptions options;
+  options.connection = connection_options();
+  options.format = OutputFormat::Json;
+  options.duration = std::chrono::duration<double>{0.1};
+  return options;
+}
+
 } // namespace netft_cli::test

@@ -105,6 +105,21 @@ TEST(CliIntegration, BiasUsesPreviewAndOneShotBiasedSession) {
   EXPECT_TRUE(environment.stderr_text().empty());
 }
 
+TEST(CliIntegration, CheckProducesOneTypedResultAndStopsStreaming) {
+  FakeSensor sensor;
+  IntegrationEnvironment environment;
+  auto arguments = connection_arguments("check", sensor);
+  arguments.insert(arguments.end(), {"--duration", "100ms", "--format", "json"});
+
+  ASSERT_EQ(run_cli(arguments, environment), 0);
+  const auto document = parse_json(environment.stdout_text());
+  EXPECT_EQ(document.at("schema_version"), 1);
+  EXPECT_EQ(document.at("result"), "pass");
+  EXPECT_TRUE(document.at("checks").is_array());
+  EXPECT_TRUE(sensor.wait_for_stop_streaming());
+  EXPECT_TRUE(environment.stderr_text().empty());
+}
+
 TEST(CliIntegration, ResolvesEnvironmentAndPropagatesTerminalOptions) {
   FakeSensor sensor;
   IntegrationEnvironment environment;

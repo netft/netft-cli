@@ -197,6 +197,35 @@ std::string render_bias_text(const BiasRecord &record) {
   return stream.str();
 }
 
+std::string render_diagnostic_text(const DiagnosticResult &result) {
+  const char *const outcome = [&] {
+    switch (result.overall) {
+    case DiagnosticOutcome::Pass:
+      return "PASS";
+    case DiagnosticOutcome::PassWithWarnings:
+      return "PASS WITH WARNINGS";
+    case DiagnosticOutcome::Fail:
+      return "FAIL";
+    }
+    return "FAIL";
+  }();
+  std::ostringstream stream;
+  stream << "NetFT check: " << outcome << '\n';
+  stream << "Samples: " << result.health.sample_count
+         << "  rate_hz: " << decimal(result.health.observed_rate_hz, 2)
+         << "  lost: " << result.health.lost_count
+         << "  reconnects: " << result.health.reconnect_count << '\n';
+  for (const auto &check : result.checks) {
+    stream << "- " << diagnostic_name(check.id) << ": " << diagnostic_status_name(check.status);
+    if (check.has_limit) {
+      stream << " (observed=" << decimal(check.observed, 3) << ", limit=" << decimal(check.limit, 3)
+             << ')';
+    }
+    stream << '\n';
+  }
+  return stream.str();
+}
+
 TerminalMonitor::TerminalMonitor(TerminalWriter &terminal) noexcept : terminal_(terminal) {}
 
 TerminalMonitor::~TerminalMonitor() {

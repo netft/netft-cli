@@ -271,6 +271,60 @@ std::string serialize(const BiasRecord &record) {
   return output;
 }
 
+std::string serialize(const DiagnosticResult &result) {
+  std::string output{"{"};
+  bool first = true;
+  append_name(output, "schema_version", first);
+  append_integer(output, machine_schema_version);
+  append_name(output, "result", first);
+  append_string(output, diagnostic_outcome_name(result.overall));
+  append_name(output, "metrics", first);
+  output.push_back('{');
+  bool first_metric = true;
+  append_name(output, "elapsed_seconds", first_metric);
+  append_double(output, result.health.elapsed_seconds);
+  append_name(output, "sample_count", first_metric);
+  append_integer(output, result.health.sample_count);
+  append_name(output, "received_count", first_metric);
+  append_integer(output, result.health.received_count);
+  append_name(output, "observed_rate_hz", first_metric);
+  append_double(output, result.health.observed_rate_hz);
+  append_name(output, "lost_count", first_metric);
+  append_integer(output, result.health.lost_count);
+  append_name(output, "duplicate_count", first_metric);
+  append_integer(output, result.health.duplicate_count);
+  append_name(output, "out_of_order_count", first_metric);
+  append_integer(output, result.health.out_of_order_count);
+  append_name(output, "reconnect_count", first_metric);
+  append_integer(output, result.health.reconnect_count);
+  append_name(output, "nonzero_status_count", first_metric);
+  append_integer(output, result.health.nonzero_status_count);
+  output.push_back('}');
+  append_name(output, "checks", first);
+  output.push_back('[');
+  for (std::size_t index = 0; index < result.checks.size(); ++index) {
+    if (index != 0) {
+      output.push_back(',');
+    }
+    const auto &check = result.checks[index];
+    output.push_back('{');
+    bool first_check = true;
+    append_name(output, "name", first_check);
+    append_string(output, diagnostic_name(check.id));
+    append_name(output, "status", first_check);
+    append_string(output, diagnostic_status_name(check.status));
+    append_name(output, "observed", first_check);
+    append_double(output, check.observed);
+    if (check.has_limit) {
+      append_name(output, "limit", first_check);
+      append_double(output, check.limit);
+    }
+    output.push_back('}');
+  }
+  output += "]}";
+  return output;
+}
+
 template <typename Record>
 void write_serialized(std::ostream &stream, const Record &record, bool newline) {
   std::string output = serialize(record);
@@ -295,6 +349,10 @@ void write_json(std::ostream &stream, const SampleRecord &record) {
 
 void write_json(std::ostream &stream, const BiasRecord &record) {
   write_serialized(stream, record, false);
+}
+
+void write_json(std::ostream &stream, const DiagnosticResult &result) {
+  write_serialized(stream, result, false);
 }
 
 void write_ndjson(std::ostream &stream, const ConfigurationRecord &record) {

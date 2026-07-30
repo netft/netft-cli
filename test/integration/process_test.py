@@ -229,6 +229,29 @@ def test_monitor_writes_parseable_ndjson_to_stdout_only() -> None:
     assert all(record["host"] == "127.0.0.1" for record in records)
 
 
+def test_check_acceptance_failure_keeps_json_on_stdout() -> None:
+    with FakeSensor() as sensor:
+        result = run_process(
+            "check",
+            sensor.host,
+            "--http-port",
+            str(sensor.http_port),
+            "--rdt-port",
+            str(sensor.rdt_port),
+            "--duration",
+            "100ms",
+            "--min-rate",
+            "1000000000",
+            "--format",
+            "json",
+        )
+    assert result.returncode == 7
+    assert not result.stderr
+    document = json.loads(result.stdout)
+    assert document["schema_version"] == 1
+    assert document["result"] == "fail"
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal process assertion")
 def test_sigint_returns_130_and_stops_streaming() -> None:
     with FakeSensor() as sensor:

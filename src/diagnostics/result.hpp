@@ -2,6 +2,7 @@
 
 #include "stream/health_collector.hpp"
 
+#include <string_view>
 #include <vector>
 
 namespace netft_cli {
@@ -35,5 +36,8 @@ struct DiagnosticResult {
 };
 
 [[nodiscard]] DiagnosticOutcome overall_result(const std::vector<DiagnosticCheck> &checks) noexcept;
+[[nodiscard]] std::string_view diagnostic_name(DiagnosticCheckId id) noexcept;
+[[nodiscard]] std::string_view diagnostic_status_name(DiagnosticStatus status) noexcept;
+[[nodiscard]] std::string_view diagnostic_outcome_name(DiagnosticOutcome outcome) noexcept;
 
 } // namespace netft_cli
