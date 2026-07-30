@@ -232,6 +232,8 @@ stream = root / "stream.txt"
 stream_count = root / "stream-count.txt"
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self):
         with request_log.open("a", encoding="utf-8") as stream:
             stream.write(self.path + "\n")
@@ -241,13 +243,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ):
             self.send_response(302)
             self.send_header("Location", redirect.read_text(encoding="utf-8"))
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
             self.end_headers()
+            self.close_connection = True
             return
         if (
             self.path == "/releases/download/v0.1.0/SHA256SUMS"
             and stream.exists()
         ):
             self.send_response(200)
+            self.send_header("Connection", "close")
             self.end_headers()
             sent = 0
             try:
@@ -259,6 +265,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     stream_count.write_text(str(sent), encoding="utf-8")
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            self.close_connection = True
             return
         relative = urllib.parse.unquote(self.path.split("?", 1)[0]).lstrip("/")
         path = (root / relative).resolve()
@@ -268,8 +275,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
+        self.close_connection = True
 
     def log_message(self, *_args):
         pass
