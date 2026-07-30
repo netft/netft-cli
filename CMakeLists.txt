@@ -289,8 +289,8 @@ if(BUILD_TESTING)
       COMMAND
         "${Python3_EXECUTABLE}" -m pytest
         "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact" -q
-        --ignore="${CMAKE_CURRENT_SOURCE_DIR}/test/artifact/install_sh_test.py"
-        --ignore="${CMAKE_CURRENT_SOURCE_DIR}/test/artifact/test_static_curl.py"
+        --ignore "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact/install_sh_test.py"
+        --ignore "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact/test_static_curl.py"
     )
   else()
     add_test(
