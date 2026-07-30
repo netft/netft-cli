@@ -235,8 +235,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        with request_log.open("a", encoding="utf-8") as stream:
-            stream.write(self.path + "\n")
+        with request_log.open("a", encoding="utf-8") as request_stream:
+            request_stream.write(self.path + "\n")
         if (
             self.path == "/releases/download/v0.1.0/SHA256SUMS"
             and redirect.exists()
@@ -244,7 +244,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Location", redirect.read_text(encoding="utf-8"))
             self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
             self.end_headers()
+            self.close_connection = True
             return
         if (
             self.path == "/releases/download/v0.1.0/SHA256SUMS"
@@ -273,9 +275,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
-        self.wfile.flush()
+        self.close_connection = True
 
     def log_message(self, *_args):
         pass
