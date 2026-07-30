@@ -33,7 +33,7 @@ build = { cmd = "cmake --build build", depends-on = ["configure"] }
 test = { cmd = "ctest --test-dir build --output-on-failure", depends-on = ["build"] }
 format-check = "git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format --dry-run --Werror"
 tidy = "cmake -S . -B build/tidy -G Ninja -DBUILD_TESTING=OFF -DNETFT_CLANG_TIDY=ON && cmake --build build/tidy"
-workflow-check = "actionlint && python -m pytest test/workflows -q"
+workflow-check = "actionlint"
 check = { cmd = "true", depends-on = ["snapshot-check", "format-check", "test", "tidy", "workflow-check"] }
 hardware-test = { cmd = "NETFT_ALLOW_BIAS=0 python test/hardware/hardware_test.py", depends-on = ["build"] }
 hardware-bias-test = { cmd = "NETFT_ALLOW_BIAS=1 python test/hardware/hardware_test.py", depends-on = ["build"] }

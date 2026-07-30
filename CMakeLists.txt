@@ -237,6 +237,14 @@ if(BUILD_TESTING)
   set_tests_properties(sync_core PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
   add_test(
+    NAME netft_release_tools
+    COMMAND "${Python3_EXECUTABLE}" -m pytest
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/tools/test_release_tools.py" -q
+  )
+  set_tests_properties(netft_release_tools
+                       PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  add_test(
     NAME netft_cli_process
     COMMAND
       "${CMAKE_COMMAND}" -E env "NETFT_EXECUTABLE=$<TARGET_FILE:netft>"
@@ -244,14 +252,6 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/test/integration/process_test.py" -q
   )
   set_tests_properties(netft_cli_process PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
-
-  add_test(
-    NAME netft_platform_scripts
-    COMMAND "${Python3_EXECUTABLE}" -m pytest
-            "${CMAKE_CURRENT_SOURCE_DIR}/test/platform/platform_scripts_test.py" -q
-  )
-  set_tests_properties(netft_platform_scripts
-                       PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
   add_test(
     NAME netft_release_artifacts
