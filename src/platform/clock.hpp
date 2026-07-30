@@ -22,4 +22,17 @@ public:
   [[nodiscard]] bool wait_until(TimePoint deadline, const InterruptFlag &interrupt) override;
 };
 
+class WallClock {
+public:
+  using TimePoint = std::chrono::system_clock::time_point;
+
+  virtual ~WallClock() = default;
+  [[nodiscard]] virtual TimePoint now() const = 0;
+};
+
+class SystemWallClock final : public WallClock {
+public:
+  [[nodiscard]] TimePoint now() const override;
+};
+
 } // namespace netft_cli

@@ -10,6 +10,8 @@ namespace netft_cli {
 
 Clock::TimePoint SystemClock::now() const { return std::chrono::steady_clock::now(); }
 
+WallClock::TimePoint SystemWallClock::now() const { return std::chrono::system_clock::now(); }
+
 bool SystemClock::wait_until(TimePoint deadline, const InterruptFlag &interrupt) {
   using namespace std::chrono_literals;
   constexpr auto interrupt_poll_interval = 50ms;

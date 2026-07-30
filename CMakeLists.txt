@@ -101,6 +101,19 @@ target_link_libraries(netft_cli_diagnostics PUBLIC netft_cli_stream)
 netft_enable_warnings(netft_cli_diagnostics)
 netft_enable_sanitizers(netft_cli_diagnostics)
 
+add_library(netft_cli_recording
+  src/recording/csv_writer.cpp
+  src/recording/ndjson_writer.cpp
+  src/recording/output_file.cpp
+  src/recording/writer.cpp
+  src/platform/filesystem.cpp
+)
+target_compile_features(netft_cli_recording PUBLIC cxx_std_17)
+target_include_directories(netft_cli_recording PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(netft_cli_recording PUBLIC netft_cli_output)
+netft_enable_warnings(netft_cli_recording)
+netft_enable_sanitizers(netft_cli_recording)
+
 add_library(netft_cli_commands
   src/commands/bias.cpp
   src/commands/check.cpp
@@ -303,6 +316,28 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_diagnostic_criteria_test)
   netft_enable_sanitizers(netft_diagnostic_criteria_test)
   add_test(NAME netft_diagnostic_criteria COMMAND netft_diagnostic_criteria_test)
+
+  add_executable(netft_recording_writer_test test/unit/recording_writer_test.cpp)
+  target_compile_features(netft_recording_writer_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_recording_writer_test PRIVATE
+    netft_cli_recording
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_recording_writer_test)
+  netft_enable_sanitizers(netft_recording_writer_test)
+  add_test(NAME netft_recording_writer COMMAND netft_recording_writer_test)
+
+  add_executable(netft_output_file_test test/unit/output_file_test.cpp)
+  target_compile_features(netft_output_file_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_output_file_test PRIVATE
+    netft_cli_recording
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_output_file_test)
+  netft_enable_sanitizers(netft_output_file_test)
+  add_test(NAME netft_output_file COMMAND netft_output_file_test)
 
   add_executable(netft_line_reader_test test/unit/line_reader_test.cpp)
   target_compile_features(netft_line_reader_test PRIVATE cxx_std_17)
