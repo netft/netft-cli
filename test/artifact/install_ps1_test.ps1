@@ -312,13 +312,31 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     $env:NETFT_CLI_RELEASE_BASE_URL = $BaseUrl
     $env:NETFT_CLI_TEST_USER_PATH_FILE = Join-Path $Temporary "user-path.txt"
     $env:LOCALAPPDATA = Join-Path $Temporary "local-app-data"
+    $RedirectFile = Join-Path $FixtureRoot "redirect.txt"
+    $RequestLog = Join-Path $FixtureRoot "requests.log"
 
     $CustomBin = Join-Path $Temporary "custom bin"
     $Explicit = Invoke-InstallerProcess -Arguments @(
         "-Version", "v0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
+    $ExplicitDiagnostics = @(
+        $Explicit.Output,
+        (
+            if (Test-Path -LiteralPath $RequestLog) {
+                "requests: " + [string]::Join(
+                    ", ",
+                    [IO.File]::ReadAllLines($RequestLog)
+                )
+            }
+        ),
+        (
+            if (Test-Path -LiteralPath $ServerErr) {
+                "server: " + [IO.File]::ReadAllText($ServerErr)
+            }
+        )
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     Assert-True ($Explicit.ExitCode -eq 0) (
-        "Explicit install failed: $($Explicit.Output)"
+        "Explicit install failed: " + [string]::Join(" | ", $ExplicitDiagnostics)
     )
     Assert-True (-not (Test-Path -LiteralPath $env:NETFT_CLI_TEST_USER_PATH_FILE)) `
         "-NoModifyPath unexpectedly changed the user PATH fixture."
@@ -332,8 +350,6 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
         $InstalledVersion[0] -ceq "netft 0.1.0"
     ) "Installed executable reported the wrong version."
 
-    $RedirectFile = Join-Path $FixtureRoot "redirect.txt"
-    $RequestLog = Join-Path $FixtureRoot "requests.log"
     $RedirectedDirectory = Join-Path $FixtureRoot "releases\redirected"
     New-Item -ItemType Directory -Path $RedirectedDirectory -Force |
         Out-Null
