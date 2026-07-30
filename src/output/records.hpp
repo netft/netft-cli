@@ -11,6 +11,8 @@
 
 namespace netft_cli {
 
+inline constexpr std::uint32_t machine_schema_version{1};
+
 struct ConfigurationRecord {
   std::string host;
   int http_port{};

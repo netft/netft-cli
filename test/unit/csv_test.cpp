@@ -32,6 +32,7 @@ TEST(Csv, UsesStableFlatColumnOrder) {
   const auto table = test::parse_csv(stream.str());
 
   EXPECT_EQ(table.header, (std::vector<std::string>{"host",
+                                                    "schema_version",
                                                     "elapsed_seconds",
                                                     "rdt_sequence",
                                                     "ft_sequence",
@@ -56,10 +57,12 @@ TEST(Csv, UsesStableFlatColumnOrder) {
                                                     "out_of_order_count",
                                                     "state"}));
   ASSERT_EQ(table.rows.size(), 1U);
-  EXPECT_EQ(table.rows[0][5], "10");
-  EXPECT_EQ(table.rows[0][10], "-60");
-  EXPECT_EQ(table.rows[0][11], "1.25");
-  EXPECT_EQ(table.rows[0][16], "-6.75");
+  EXPECT_EQ(table.rows[0][0], "192.168.1.1");
+  EXPECT_EQ(table.rows[0][1], "1");
+  EXPECT_EQ(table.rows[0][6], "10");
+  EXPECT_EQ(table.rows[0][11], "-60");
+  EXPECT_EQ(table.rows[0][12], "1.25");
+  EXPECT_EQ(table.rows[0][17], "-6.75");
 }
 
 TEST(Csv, QuotesTextAccordingToRfc4180) {
@@ -105,6 +108,14 @@ TEST(Csv, RejectsNonfiniteValuesBeforeWritingHeader) {
 
   test::expect_app_error(ExitCode::Io, [&] { writer.write(record); });
   EXPECT_TRUE(stream.str().empty());
+}
+
+TEST(Csv, MachineOutputNeverContainsAnsiEscapes) {
+  std::ostringstream stream;
+  CsvWriter writer(stream);
+  writer.write(test::sample_record());
+
+  EXPECT_EQ(stream.str().find("\x1b["), std::string::npos);
 }
 
 } // namespace

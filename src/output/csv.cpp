@@ -15,7 +15,8 @@
 namespace netft_cli {
 namespace {
 
-constexpr std::string_view header = "host,elapsed_seconds,rdt_sequence,ft_sequence,status,"
+constexpr std::string_view header = "host,schema_version,elapsed_seconds,rdt_sequence,"
+                                    "ft_sequence,status,"
                                     "raw_fx,raw_fy,raw_fz,raw_tx,raw_ty,raw_tz,"
                                     "fx,fy,fz,tx,ty,tz,force_unit,torque_unit,receive_rate_hz,"
                                     "lost_count,duplicate_count,out_of_order_count,state\r\n";
@@ -71,6 +72,8 @@ std::string serialize_row(const SampleRecord &record) {
   validate(record);
   std::string output;
   append_field(output, record.host);
+  append_separator(output);
+  append_number(output, machine_schema_version);
   append_separator(output);
   append_number(output, record.elapsed_seconds);
   append_separator(output);

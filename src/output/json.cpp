@@ -169,6 +169,8 @@ std::string serialize(const ConfigurationRecord &record) {
   validate(record);
   std::string output{"{"};
   bool first = true;
+  append_name(output, "schema_version", first);
+  append_integer(output, machine_schema_version);
   append_name(output, "host", first);
   append_string(output, record.host);
   append_name(output, "http_port", first);
@@ -207,6 +209,8 @@ std::string serialize(const SampleRecord &record) {
   validate(record);
   std::string output{"{"};
   bool first = true;
+  append_name(output, "schema_version", first);
+  append_integer(output, machine_schema_version);
   append_name(output, "host", first);
   append_string(output, record.host);
   append_name(output, "elapsed_seconds", first);
@@ -255,7 +259,9 @@ std::string serialize(const SampleRecord &record) {
 
 std::string serialize(const BiasRecord &record) {
   validate(record);
-  std::string output{"{\"configuration\":"};
+  std::string output{"{\"schema_version\":"};
+  append_integer(output, machine_schema_version);
+  output += ",\"configuration\":";
   output += serialize(record.configuration);
   output += ",\"before\":";
   output += serialize(record.before);

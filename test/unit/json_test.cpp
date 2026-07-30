@@ -16,6 +16,8 @@ TEST(Json, EmitsFiniteTypedSampleDocument) {
   write_ndjson(stream, test::sample_record());
   const auto document = test::parse_json(stream.str());
 
+  EXPECT_EQ(document.at("schema_version"), 1);
+  EXPECT_TRUE(document.at("schema_version").is_number_integer());
   EXPECT_EQ(document.at("rdt_sequence"), 41);
   EXPECT_EQ(document.at("raw").size(), 6U);
   EXPECT_EQ(document.at("force").at("raw"), (test::Json::array({10, -20, 30})));
@@ -46,6 +48,7 @@ TEST(Json, EmitsNestedConfigurationCalibration) {
   write_json(stream, make_configuration_record(options, test::configuration()));
   const auto document = test::parse_json(stream.str());
 
+  EXPECT_EQ(document.at("schema_version"), 1);
   EXPECT_EQ(document.at("host"), "sensor.example");
   EXPECT_EQ(document.at("product_name"), "ATI Mini45");
   EXPECT_EQ(document.at("calibration").at("source"), "sensor");
@@ -61,6 +64,10 @@ TEST(Json, EmitsBiasBeforeAndAfterDocuments) {
                                 test::sample_record(41), test::sample_record(42)});
   const auto document = test::parse_json(stream.str());
 
+  EXPECT_EQ(document.at("schema_version"), 1);
+  EXPECT_EQ(document.at("configuration").at("schema_version"), 1);
+  EXPECT_EQ(document.at("before").at("schema_version"), 1);
+  EXPECT_EQ(document.at("after").at("schema_version"), 1);
   EXPECT_EQ(document.at("before").at("rdt_sequence"), 41U);
   EXPECT_EQ(document.at("after").at("rdt_sequence"), 42U);
 }
@@ -81,6 +88,13 @@ TEST(Json, EscapesStringsWithoutChangingTheirValues) {
   write_json(stream, record);
 
   EXPECT_EQ(test::parse_json(stream.str()).at("host"), record.host);
+}
+
+TEST(Json, MachineOutputNeverContainsAnsiEscapes) {
+  std::ostringstream stream;
+  write_ndjson(stream, test::sample_record());
+
+  EXPECT_EQ(stream.str().find("\x1b["), std::string::npos);
 }
 
 } // namespace

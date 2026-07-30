@@ -224,6 +224,7 @@ def test_monitor_writes_parseable_ndjson_to_stdout_only() -> None:
     assert not result.stderr
     records = [json.loads(line) for line in result.stdout.splitlines()]
     assert records
+    assert all(record["schema_version"] == 1 for record in records)
     assert all(isinstance(record["raw"], list) for record in records)
     assert all(record["host"] == "127.0.0.1" for record in records)
 

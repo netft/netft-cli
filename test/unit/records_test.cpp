@@ -17,6 +17,7 @@ TEST(Records, ConstructsConfigurationFromDeviceDiscovery) {
       "sensor.example", 8080, 49153, std::chrono::duration<double>{0.5}, {}};
   const auto record = make_configuration_record(options, test::configuration());
 
+  EXPECT_EQ(machine_schema_version, 1U);
   EXPECT_EQ(record.host, "sensor.example");
   EXPECT_EQ(record.http_port, 8080);
   EXPECT_EQ(record.rdt_port, 49153);
@@ -32,6 +33,7 @@ TEST(Records, ConstructsConfigurationFromDeviceDiscovery) {
 TEST(Records, ConstructsScaledAxesInFxFyFzTxTyTzOrder) {
   const auto record = test::sample_record();
 
+  EXPECT_EQ(machine_schema_version, 1U);
   EXPECT_EQ(record.host, "192.168.1.1");
   EXPECT_DOUBLE_EQ(record.elapsed_seconds, 1.25);
   EXPECT_EQ(record.raw, (std::array<std::int32_t, 6>{10, -20, 30, -40, 50, -60}));
