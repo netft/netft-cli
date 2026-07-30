@@ -147,15 +147,31 @@ validate_download_url() {
     die "release fixture port is not accepted"
 }
 
+measure_file_bytes() {
+  wc -c <"$1" |
+    awk '
+      {
+        if (seen || NF != 1 || $1 !~ /^[0-9]+$/) {
+          exit 1
+        }
+        value = $1
+        seen = 1
+      }
+      END {
+        if (!seen) {
+          exit 1
+        }
+        print value
+      }
+    '
+}
+
 assert_file_within_limit() {
   bounded_path=$1
   bounded_limit=$2
   [ -f "$bounded_path" ] || die "download did not produce a regular file"
-  bounded_size=$(wc -c <"$bounded_path") ||
+  bounded_size=$(measure_file_bytes "$bounded_path") ||
     die "unable to measure downloaded file"
-  case "$bounded_size" in
-    '' | *[!0-9]*) die "unable to measure downloaded file" ;;
-  esac
   [ "$bounded_size" -le "$bounded_limit" ] ||
     die "download exceeds the installer size limit"
 }
@@ -398,11 +414,8 @@ bounded_extract_member() {
   ); then
     die "release archive member exceeds its limit or cannot be read"
   fi
-  member_size=$(wc -c <"$bounded_output") ||
+  member_size=$(measure_file_bytes "$bounded_output") ||
     die "unable to measure extracted archive member"
-  case "$member_size" in
-    '' | *[!0-9]*) die "unable to measure extracted archive member" ;;
-  esac
   [ "$member_size" -le "$MAX_MEMBER_BYTES" ] ||
     die "release archive member exceeds its size limit"
   extracted_total=$((extracted_total + member_size))

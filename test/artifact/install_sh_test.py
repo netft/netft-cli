@@ -544,6 +544,35 @@ def test_install_sh_supports_wget_when_curl_is_unavailable(tmp_path: Path) -> No
     assert (tmp_path / "bin" / "netft").read_bytes() == fake_binary("0.1.0")
 
 
+def test_install_sh_accepts_padded_wc_output(tmp_path: Path) -> None:
+    restricted = restricted_tool_path(tmp_path / "restricted-tools")
+    real_wc = shutil.which("wc")
+    assert real_wc is not None
+    wc = restricted / "wc"
+    wc.unlink()
+    wc.write_text(
+        "#!/bin/sh\n"
+        f"measured=$('{real_wc}' \"$@\") || exit $?\n"
+        "printf '  %s\\n' \"$measured\"\n",
+        encoding="utf-8",
+    )
+    wc.chmod(0o755)
+
+    with release_server(fixture_files()) as (base_url, _server):
+        result = run_installer(
+            base_url,
+            tmp_path,
+            "--version",
+            "0.1.0",
+            "--bin-dir",
+            str(tmp_path / "bin"),
+            path=str(restricted),
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "bin" / "netft").read_bytes() == fake_binary("0.1.0")
+
+
 def test_install_sh_propagates_download_failure_and_preserves_binary(
     tmp_path: Path,
 ) -> None:
