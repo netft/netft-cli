@@ -81,6 +81,7 @@ try {
 
     cmake -S $sourceRoot -B $binaryRoot -G $visualStudioGenerator -A x64 `
         -DCMAKE_INSTALL_PREFIX="$prefix" `
+        -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
         -DBUILD_CURL_EXE=OFF `
         -DBUILD_SHARED_LIBS=OFF `
         -DBUILD_STATIC_LIBS=ON `
