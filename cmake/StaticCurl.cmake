@@ -89,6 +89,15 @@ function(netft_lock_static_curl_target)
       "${_netft_core_foundation_framework}"
       "${_netft_system_configuration_framework}"
     )
+  elseif(WIN32)
+    set_property(TARGET CURL::libcurl APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES
+      ws2_32
+      iphlpapi
+      bcrypt
+      advapi32
+      crypt32
+    )
   endif()
   get_target_property(_netft_curl_imported_location
                       CURL::libcurl IMPORTED_LOCATION)
