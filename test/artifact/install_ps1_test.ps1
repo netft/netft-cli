@@ -565,7 +565,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     )
     Assert-True (
         $BinReparseFailure.ExitCode -ne 0 -and
-        (Get-ChildItem -LiteralPath $RealBin -Force).Count -eq 0
+        @(Get-ChildItem -LiteralPath $RealBin -Force).Count -eq 0
     ) "A reparse-point installation directory was accepted."
 
     $OverrideDestination = Join-Path $Temporary "override-destination"
