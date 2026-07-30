@@ -52,6 +52,8 @@ function(netft_prepare_static_curl)
       "Pinned static curl library" FORCE)
   set(CURL_LIBRARY_RELEASE "${_netft_curl_library}" CACHE FILEPATH
       "Pinned static curl release library" FORCE)
+  set(CURL_NO_CURL_CMAKE TRUE CACHE BOOL
+      "Ignore curl package metadata for the validated static archive" FORCE)
   set(NETFT_CLI_STATIC_CURL_LIBRARY "${_netft_curl_library}" CACHE INTERNAL
       "Validated static curl library" FORCE)
 endfunction()
@@ -74,6 +76,29 @@ function(netft_lock_static_curl_target)
     IMPORTED_LOCATION_RELWITHDEBINFO "${NETFT_CLI_STATIC_CURL_LIBRARY}"
     IMPORTED_LOCATION_MINSIZEREL "${NETFT_CLI_STATIC_CURL_LIBRARY}"
   )
+  if(APPLE)
+    find_library(_netft_core_foundation_framework CoreFoundation)
+    find_library(_netft_system_configuration_framework SystemConfiguration)
+    if(NOT _netft_core_foundation_framework OR
+       NOT _netft_system_configuration_framework)
+      message(FATAL_ERROR
+        "the macOS frameworks required by static curl were not found")
+    endif()
+    set_property(TARGET CURL::libcurl APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES
+      "${_netft_core_foundation_framework}"
+      "${_netft_system_configuration_framework}"
+    )
+  elseif(WIN32)
+    set_property(TARGET CURL::libcurl APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES
+      ws2_32
+      iphlpapi
+      bcrypt
+      advapi32
+      crypt32
+    )
+  endif()
   get_target_property(_netft_curl_imported_location
                       CURL::libcurl IMPORTED_LOCATION)
   if(NOT _netft_curl_imported_location STREQUAL
