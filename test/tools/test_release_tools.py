@@ -35,6 +35,7 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
     names = sorted(release_inventory.expected_asset_names("0.1.0"))
     metadata = {
         "id": 41,
+        "name": "v0.1.0",
         "tag_name": "v0.1.0",
         "draft": True,
         "prerelease": False,
@@ -53,7 +54,9 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
         {**metadata, "prerelease": True},
         {key: value for key, value in metadata.items() if key != "prerelease"},
         {**metadata, "id": 42},
+        {**metadata, "name": "v9.9.9"},
         {**metadata, "tag_name": "v9.9.9"},
+        {**metadata, "tag_name": "untagged-"},
         {key: value for key, value in metadata.items() if key != "tag_name"},
         {**metadata, "assets": metadata["assets"][:-1]},
         {
@@ -76,12 +79,19 @@ def test_remote_release_inventory_requires_exact_draft_assets() -> None:
                 changed, "0.1.0", expected_release_id=41
             )
 
+    release_inventory.validate_remote_inventory(
+        {**metadata, "tag_name": "untagged-draftidentity"},
+        "0.1.0",
+        expected_release_id=41,
+    )
+
 
 def test_remote_asset_downloads_are_bound_to_validated_asset_ids() -> None:
     release_inventory = load_release_inventory_module()
     names = sorted(release_inventory.expected_asset_names("0.1.0"))
     metadata = {
         "id": 41,
+        "name": "v0.1.0",
         "tag_name": "v0.1.0",
         "draft": True,
         "prerelease": False,
