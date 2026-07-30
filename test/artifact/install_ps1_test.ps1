@@ -319,21 +319,23 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     $Explicit = Invoke-InstallerProcess -Arguments @(
         "-Version", "v0.1.0", "-BinDir", $CustomBin, "-NoModifyPath"
     )
+    $RequestDiagnostics = if (Test-Path -LiteralPath $RequestLog) {
+        "requests: " + [string]::Join(
+            ", ",
+            [IO.File]::ReadAllLines($RequestLog)
+        )
+    } else {
+        ""
+    }
+    $ServerDiagnostics = if (Test-Path -LiteralPath $ServerErr) {
+        "server: " + [IO.File]::ReadAllText($ServerErr)
+    } else {
+        ""
+    }
     $ExplicitDiagnostics = @(
         $Explicit.Output,
-        (
-            if (Test-Path -LiteralPath $RequestLog) {
-                "requests: " + [string]::Join(
-                    ", ",
-                    [IO.File]::ReadAllLines($RequestLog)
-                )
-            }
-        ),
-        (
-            if (Test-Path -LiteralPath $ServerErr) {
-                "server: " + [IO.File]::ReadAllText($ServerErr)
-            }
-        )
+        $RequestDiagnostics,
+        $ServerDiagnostics
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     Assert-True ($Explicit.ExitCode -eq 0) (
         "Explicit install failed: " + [string]::Join(" | ", $ExplicitDiagnostics)
