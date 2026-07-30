@@ -80,7 +80,7 @@ def test_mixed_unix_prefix_locks_target_to_static_archive(tmp_path: Path) -> Non
     completed = configure_fixture(tmp_path, prefix)
 
     assert completed.returncode == 0
-    assert (tmp_path / "build" / "resolved.txt").read_text() == str(library)
+    assert Path((tmp_path / "build" / "resolved.txt").read_text()) == library
 
 
 def test_windows_import_style_library_is_rejected(tmp_path: Path) -> None:
@@ -103,7 +103,7 @@ def test_windows_explicit_static_library_is_accepted(tmp_path: Path) -> None:
     completed = configure_fixture(tmp_path, prefix, "Windows")
 
     assert completed.returncode == 0
-    assert (tmp_path / "build" / "resolved.txt").read_text() == str(library)
+    assert Path((tmp_path / "build" / "resolved.txt").read_text()) == library
 
 
 def test_windows_mixed_static_and_import_libraries_are_rejected(tmp_path: Path) -> None:

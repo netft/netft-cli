@@ -283,11 +283,22 @@ if(BUILD_TESTING)
   )
   set_tests_properties(netft_cli_process PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
-  add_test(
-    NAME netft_release_artifacts
-    COMMAND "${Python3_EXECUTABLE}" -m pytest
-            "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact" -q
-  )
+  if(WIN32)
+    add_test(
+      NAME netft_release_artifacts
+      COMMAND
+        "${Python3_EXECUTABLE}" -m pytest
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact" -q
+        --ignore="${CMAKE_CURRENT_SOURCE_DIR}/test/artifact/install_sh_test.py"
+        --ignore="${CMAKE_CURRENT_SOURCE_DIR}/test/artifact/test_static_curl.py"
+    )
+  else()
+    add_test(
+      NAME netft_release_artifacts
+      COMMAND "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/test/artifact" -q
+    )
+  endif()
   set_tests_properties(netft_release_artifacts
                        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
