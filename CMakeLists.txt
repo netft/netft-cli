@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+
 project(netft_cli VERSION 0.1.0 LANGUAGES CXX)
+
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY
+      "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 include(CTest)
 
