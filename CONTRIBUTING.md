@@ -12,20 +12,43 @@ cd netft-cli
 pixi install
 ```
 
-Use the repository tasks rather than relying on host tool versions:
+Run the complete local gate with:
 
 ```bash
 pixi run check
 pixi run sanitizers
 ```
 
-`pixi run check` verifies the core snapshot, formatting, native build and tests, static analysis, and GitHub workflows. The ordinary integration suite uses local fake HTTP and UDP sensors; it must never require or contact physical hardware. Run `pixi run sanitizers` for native memory and undefined-behavior checks.
+`pixi run check` verifies the core snapshot, formatting, native build and tests, static analysis, and GitHub workflows. `pixi run sanitizers` rebuilds and runs the suite with AddressSanitizer and UndefinedBehaviorSanitizer.
 
-Tests should verify typed behavior, protocols, serializers, exit categories, and other machine-readable contracts. Do not freeze README, changelog, release-note, help, diagnostic, or terminal prose in tests.
+For a focused native test:
+
+```bash
+pixi run configure
+pixi run cmake --build build --target netft_diagnostic_criteria_test
+pixi run ctest --test-dir build -R netft_diagnostic_criteria --output-on-failure
+```
+
+The process-level integration tests use local fake HTTP and UDP sensors:
+
+```bash
+pixi run cmake --build build --target netft
+NETFT_EXECUTABLE="$PWD/build/netft" pixi run pytest -q test/integration/process_test.py
+```
+
+Ordinary automated tests must never require or contact physical hardware.
+
+## Testing expectations
+
+Tests should verify typed behavior, protocols, serializers, exit categories, resource ownership, and other machine-readable contracts. Prefer deterministic fake-sensor or injected-boundary tests for time, interruption, queue pressure, writer failure, and network behavior.
+
+Do not freeze README, changelog, release-note, help, diagnostic, or terminal prose in tests. Help and completion tests should inspect semantic inventory and registration behavior rather than complete output snapshots. Add tests for observable behavior and defects, not for implementation details or coverage percentage alone.
+
+Machine-readable output is a public interface. Preserve the meaning and types of existing fields within a schema version. An intentional incompatible change requires a new schema version, structural parser tests, documentation, and a changelog entry.
 
 ## Hardware testing is opt-in
 
-Physical-sensor tests require explicit approval from the person responsible for the sensor and test area. Provide the intended host only for the individual command:
+Physical-sensor tests require explicit approval from the person responsible for the sensor and test area. Pass the host only in the environment for the individual command:
 
 ```bash
 NETFT_SENSOR_HOST=<sensor-host> pixi run hardware-test
@@ -41,7 +64,7 @@ NETFT_SENSOR_HOST=<sensor-host> pixi run hardware-bias-test
 
 The dedicated task supplies the second `NETFT_ALLOW_BIAS=1` gate to the hardware harness. Select it only after obtaining fresh authorization for that run, unloading or safely fixturing the sensor, stopping hazardous motion, and keeping people clear. Authorization must not be reused between runs.
 
-Never commit a laboratory sensor address, credentials, or private network details. Public examples use only ATI's documented factory-default address.
+Never commit a laboratory sensor address, credentials, recordings, or private network details. Public examples use only ATI's documented factory-default address.
 
 ## Core synchronization
 
