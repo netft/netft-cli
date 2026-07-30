@@ -652,7 +652,13 @@ try {
         try {
             if ($HadPreviousBinary -and $Backup -and
                 (Test-Path -LiteralPath $Backup -PathType Leaf)) {
-                [IO.File]::Replace($Backup, $Destination, $null, $true)
+                $FailedReplacement = Join-Path $Temporary "netft.exe.failed"
+                [IO.File]::Replace(
+                    $Backup,
+                    $Destination,
+                    $FailedReplacement,
+                    $true
+                )
             } elseif (-not $HadPreviousBinary -and
                 (Test-Path -LiteralPath $Destination -PathType Leaf)) {
                 Remove-Item -LiteralPath $Destination -Force
