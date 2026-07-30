@@ -26,7 +26,7 @@ struct RecorderResult {
 
 class Recorder {
 public:
-  Recorder(SensorBackend &backend, const ConnectionOptions &connection, RecordingWriter &writer,
+  Recorder(SensorBackend &backend, ConnectionOptions connection, RecordingWriter &writer,
            Clock &clock, WallClock &wall_clock, InterruptFlag &interrupt);
 
   [[nodiscard]] RecorderResult run(const RecorderLimits &limits,
@@ -34,7 +34,7 @@ public:
 
 private:
   SensorBackend &backend_;
-  const ConnectionOptions &connection_;
+  ConnectionOptions connection_;
   RecordingWriter &writer_;
   Clock &clock_;
   WallClock &wall_clock_;

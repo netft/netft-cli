@@ -9,13 +9,13 @@
 #include <chrono>
 #include <exception>
 #include <thread>
+#include <utility>
 
 namespace netft_cli {
 
-Recorder::Recorder(SensorBackend &backend, const ConnectionOptions &connection,
-                   RecordingWriter &writer, Clock &clock, WallClock &wall_clock,
-                   InterruptFlag &interrupt)
-    : backend_(backend), connection_(connection), writer_(writer), clock_(clock),
+Recorder::Recorder(SensorBackend &backend, ConnectionOptions connection, RecordingWriter &writer,
+                   Clock &clock, WallClock &wall_clock, InterruptFlag &interrupt)
+    : backend_(backend), connection_(std::move(connection)), writer_(writer), clock_(clock),
       wall_clock_(wall_clock), interrupt_(interrupt) {}
 
 RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<void()> &finalize) {
