@@ -56,6 +56,7 @@ add_library(netft_cli_stream
   src/platform/clock.cpp
   src/platform/interrupt.cpp
   src/stream/acquisition.cpp
+  src/stream/bounded_sample_queue.cpp
   src/stream/health_collector.cpp
   src/stream/latest_sample.cpp
 )
@@ -280,6 +281,17 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_health_collector_test)
   netft_enable_sanitizers(netft_health_collector_test)
   add_test(NAME netft_health_collector COMMAND netft_health_collector_test)
+
+  add_executable(netft_bounded_sample_queue_test test/unit/bounded_sample_queue_test.cpp)
+  target_compile_features(netft_bounded_sample_queue_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_bounded_sample_queue_test PRIVATE
+    netft_cli_stream
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_bounded_sample_queue_test)
+  netft_enable_sanitizers(netft_bounded_sample_queue_test)
+  add_test(NAME netft_bounded_sample_queue COMMAND netft_bounded_sample_queue_test)
 
   add_executable(netft_diagnostic_criteria_test test/unit/diagnostic_criteria_test.cpp)
   target_compile_features(netft_diagnostic_criteria_test PRIVATE cxx_std_17)
