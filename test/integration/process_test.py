@@ -45,6 +45,34 @@ def test_help_and_version_use_stdout() -> None:
         assert not result.stderr
 
 
+@pytest.mark.parametrize(
+    "command", ["info", "monitor", "check", "record", "bias", "completion"]
+)
+def test_command_help_is_available(command: str) -> None:
+    result = run_process(command, "--help")
+    assert result.returncode == 0
+    assert f"netft {command}" in result.stdout
+    assert not result.stderr
+
+
+@pytest.mark.parametrize(
+    ("shell", "entry_point"),
+    [
+        ("bash", "complete -F"),
+        ("zsh", "#compdef"),
+        ("fish", "complete -c"),
+        ("powershell", "Register-ArgumentCompleter"),
+    ],
+)
+def test_completion_registers_with_the_requested_shell(
+    shell: str, entry_point: str
+) -> None:
+    result = run_process("completion", shell)
+    assert result.returncode == 0
+    assert entry_point in result.stdout
+    assert not result.stderr
+
+
 def test_invalid_host_is_usage_error() -> None:
     result = run_process("info", "http://127.0.0.1")
     assert result.returncode == 2

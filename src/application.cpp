@@ -1,6 +1,8 @@
 #include "application.hpp"
 
 #include "app/error.hpp"
+#include "cli/completion.hpp"
+#include "cli/help.hpp"
 #include "cli/parser.hpp"
 #include "commands/bias.hpp"
 #include "commands/check.hpp"
@@ -43,34 +45,6 @@ template <typename... Functions> struct Overloaded : Functions... {
   using Functions::operator()...;
 };
 template <typename... Functions> Overloaded(Functions...) -> Overloaded<Functions...>;
-
-void write_general_help(std::ostream &stream) {
-  stream << "Usage: netft <command> [options]\n\n"
-            "Commands:\n"
-            "  info <HOST>     Show sensor configuration\n"
-            "  monitor <HOST>  Stream current force and torque samples\n"
-            "  bias <HOST>     Apply a software bias after confirmation\n"
-            "  help [COMMAND]  Show help\n\n"
-            "Global options:\n"
-            "  --help          Show help\n"
-            "  --version       Show version\n";
-}
-
-void write_command_help(std::ostream &stream, const std::string &topic) {
-  if (topic == "monitor") {
-    stream << "Usage: netft monitor <HOST> [--rate HZ] [--duration DURATION]\n"
-              "                     [--format table|ndjson|csv] [connection options]\n";
-  } else if (topic == "bias") {
-    stream << "Usage: netft bias <HOST> [--yes] [--format text|json] [connection options]\n";
-  } else {
-    stream << "Usage: netft info <HOST> [--format text|json] [connection options]\n";
-  }
-  stream << "\nConnection options:\n"
-            "  --http-port PORT\n"
-            "  --rdt-port PORT\n"
-            "  --timeout DURATION\n"
-            "  --output PATH\n";
-}
 
 } // namespace
 
@@ -119,11 +93,7 @@ Filesystem &NativeEnvironment::filesystem() { return implementation_->filesystem
 EnvironmentMap NativeEnvironment::environment() const { return read_process_environment(); }
 
 int NativeEnvironment::show_help(const ShowHelp &help) {
-  if (help.topic == "general") {
-    write_general_help(implementation_->output.standard_output);
-  } else {
-    write_command_help(implementation_->output.standard_output, help.topic);
-  }
+  implementation_->output.standard_output << render_help(help.topic);
   implementation_->output.standard_output.flush();
   if (!implementation_->output.standard_output) {
     throw AppError{ExitCode::Io, "failed to write help output"};
@@ -164,6 +134,15 @@ int run_application(const std::vector<std::string_view> &arguments, AppEnvironme
                    return run_record(value, environment.backend(), environment.output(),
                                      environment.interrupt(), environment.clock(),
                                      environment.wall_clock(), environment.filesystem());
+                 },
+                 [&](const CompletionOptions &value) {
+                   environment.output().terminal = value.terminal;
+                   environment.output().standard_output << render_completion(value.shell);
+                   environment.output().standard_output.flush();
+                   if (!environment.output().standard_output) {
+                     throw AppError{ExitCode::Io, "failed to write completion output"};
+                   }
+                   return 0;
                  },
                  [&](const BiasOptions &value) {
                    environment.output().terminal = value.terminal;

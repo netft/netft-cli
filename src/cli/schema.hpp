@@ -47,6 +47,7 @@ struct OptionSpec {
   OptionValueType value_type;
   bool repeatable{};
   std::vector<std::string_view> values;
+  std::string_view description;
 };
 
 struct PositionalSpec {

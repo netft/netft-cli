@@ -33,6 +33,8 @@ include(cmake/Sanitizers.cmake)
 include(cmake/NetftCore.cmake)
 
 add_library(netft_cli_cli
+  src/cli/completion.cpp
+  src/cli/help.cpp
   src/config/environment.cpp
   src/config/resolver.cpp
   src/cli/parser.cpp
@@ -180,6 +182,20 @@ if(BUILD_TESTING)
   netft_enable_warnings(netft_cli_parser_test)
   netft_enable_sanitizers(netft_cli_parser_test)
   add_test(NAME netft_cli_parser COMMAND netft_cli_parser_test)
+
+  add_executable(netft_help_test test/unit/help_test.cpp)
+  target_compile_features(netft_help_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_help_test PRIVATE netft_cli_cli GTest::gtest_main)
+  netft_enable_warnings(netft_help_test)
+  netft_enable_sanitizers(netft_help_test)
+  add_test(NAME netft_help COMMAND netft_help_test)
+
+  add_executable(netft_completion_test test/unit/completion_test.cpp)
+  target_compile_features(netft_completion_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_completion_test PRIVATE netft_cli_cli GTest::gtest_main)
+  netft_enable_warnings(netft_completion_test)
+  netft_enable_sanitizers(netft_completion_test)
+  add_test(NAME netft_completion COMMAND netft_completion_test)
 
   add_executable(netft_config_resolver_test test/unit/config_resolver_test.cpp)
   target_compile_features(netft_config_resolver_test PRIVATE cxx_std_17)
