@@ -1,11 +1,12 @@
 #include "commands/monitor.hpp"
 
 #include "app/error.hpp"
-#include "monitor/latest_sample.hpp"
 #include "output/csv.hpp"
 #include "output/json.hpp"
 #include "output/records.hpp"
 #include "output/terminal.hpp"
+#include "stream/acquisition.hpp"
+#include "stream/latest_sample.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -41,42 +42,6 @@ void discover(const MonitorOptions &options, SensorBackend &backend) {
     static_cast<void>(backend.discover(options.connection));
   } catch (const std::exception &) {
     throw AppError{ExitCode::Discovery, "sensor discovery failed"};
-  }
-}
-
-std::unique_ptr<SensorSession> open_session(const MonitorOptions &options, SensorBackend &backend) {
-  try {
-    return backend.open(options.connection);
-  } catch (const std::exception &) {
-    throw AppError{ExitCode::Stream, "sensor stream could not be opened"};
-  }
-}
-
-class SessionStop {
-public:
-  explicit SessionStop(SensorSession &session) noexcept : session_(session) {}
-  ~SessionStop() { stop(); }
-
-  SessionStop(const SessionStop &) = delete;
-  SessionStop &operator=(const SessionStop &) = delete;
-
-  void stop() noexcept {
-    if (active_) {
-      session_.stop();
-      active_ = false;
-    }
-  }
-
-private:
-  SensorSession &session_;
-  bool active_{true};
-};
-
-netft::HealthSnapshot read_health(const SensorSession &session) {
-  try {
-    return session.health();
-  } catch (const std::exception &) {
-    throw AppError{ExitCode::Stream, "sensor stream health query failed"};
   }
 }
 
@@ -245,27 +210,21 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
                                  : OutputHandle::standard(output.standard_output);
   discover(options, backend);
   LatestSampleSlot latest;
-  auto session = open_session(options, backend);
-  SessionStop stop_session(*session);
-
-  try {
-    session->start([&latest](const netft::Sample &sample) { latest.publish(sample); });
-  } catch (const std::exception &) {
-    throw AppError{ExitCode::Stream, "sensor stream could not be started"};
-  }
+  auto acquisition = Acquisition::open(backend, options.connection);
+  acquisition.start([&latest](const netft::Sample &sample) { latest.publish(sample); });
 
   if (interrupt.requested()) {
-    stop_session.stop();
+    acquisition.stop();
     destination.flush();
     return static_cast<int>(ExitCode::Interrupted);
   }
   if (!latest.wait_for_first(options.connection.timeout, interrupt)) {
     if (interrupt.requested()) {
-      stop_session.stop();
+      acquisition.stop();
       destination.flush();
       return static_cast<int>(ExitCode::Interrupted);
     }
-    require_healthy(read_health(*session));
+    require_healthy(acquisition.health());
     throw AppError{ExitCode::Stream, "sensor stream produced no sample before timeout"};
   }
 
@@ -280,7 +239,7 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
   auto deadline = first_deadline;
   const auto finish = [&](int status) {
     sample_output.close();
-    stop_session.stop();
+    acquisition.stop();
     destination.flush();
     return status;
   };
@@ -305,7 +264,7 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
       return finish(0);
     }
 
-    const auto health = read_health(*session);
+    const auto health = acquisition.health();
     require_healthy(health);
     const auto sample = latest.snapshot();
     if (!sample) {

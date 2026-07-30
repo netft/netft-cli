@@ -1,10 +1,10 @@
 #include "commands/bias.hpp"
 
 #include "app/error.hpp"
-#include "monitor/latest_sample.hpp"
 #include "output/json.hpp"
 #include "output/records.hpp"
 #include "output/terminal.hpp"
+#include "stream/latest_sample.hpp"
 
 #include <atomic>
 #include <chrono>

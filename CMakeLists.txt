@@ -32,22 +32,39 @@ include(cmake/Warnings.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/NetftCore.cmake)
 
-add_library(netft_cli_options
+add_library(netft_cli_cli
   src/config/environment.cpp
   src/config/resolver.cpp
   src/cli/parser.cpp
   src/cli/schema.cpp
 )
-target_compile_features(netft_cli_options PUBLIC cxx_std_17)
-target_include_directories(netft_cli_options PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-netft_enable_warnings(netft_cli_options)
-netft_enable_sanitizers(netft_cli_options)
+target_compile_features(netft_cli_cli PUBLIC cxx_std_17)
+target_include_directories(netft_cli_cli PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+netft_enable_warnings(netft_cli_cli)
+netft_enable_sanitizers(netft_cli_cli)
 
-add_library(netft_cli_output
+add_library(netft_cli_sensor
   src/sensor/netft_backend.cpp
+)
+target_compile_features(netft_cli_sensor PUBLIC cxx_std_17)
+target_include_directories(netft_cli_sensor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(netft_cli_sensor PUBLIC netft_core netft_cli_cli)
+netft_enable_warnings(netft_cli_sensor)
+netft_enable_sanitizers(netft_cli_sensor)
+
+add_library(netft_cli_stream
   src/platform/clock.cpp
   src/platform/interrupt.cpp
-  src/monitor/latest_sample.cpp
+  src/stream/acquisition.cpp
+  src/stream/latest_sample.cpp
+)
+target_compile_features(netft_cli_stream PUBLIC cxx_std_17)
+target_include_directories(netft_cli_stream PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(netft_cli_stream PUBLIC netft_cli_sensor Threads::Threads)
+netft_enable_warnings(netft_cli_stream)
+netft_enable_sanitizers(netft_cli_stream)
+
+add_library(netft_cli_output
   src/output/records.cpp
   src/output/context.cpp
   src/output/confirmation.cpp
@@ -68,7 +85,7 @@ else()
 endif()
 target_compile_features(netft_cli_output PUBLIC cxx_std_17)
 target_include_directories(netft_cli_output PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(netft_cli_output PUBLIC netft_core netft_cli_options)
+target_link_libraries(netft_cli_output PUBLIC netft_core netft_cli_cli)
 netft_enable_warnings(netft_cli_output)
 netft_enable_sanitizers(netft_cli_output)
 
@@ -79,7 +96,11 @@ add_library(netft_cli_commands
 )
 target_compile_features(netft_cli_commands PUBLIC cxx_std_17)
 target_include_directories(netft_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(netft_cli_commands PUBLIC netft_cli_output)
+target_link_libraries(netft_cli_commands PUBLIC
+  netft_cli_output
+  netft_cli_sensor
+  netft_cli_stream
+)
 netft_enable_warnings(netft_cli_commands)
 netft_enable_sanitizers(netft_cli_commands)
 
@@ -106,7 +127,7 @@ if(BUILD_TESTING)
 
   add_executable(netft_options_test test/unit/options_test.cpp)
   target_compile_features(netft_options_test PRIVATE cxx_std_17)
-  target_link_libraries(netft_options_test PRIVATE netft_cli_options GTest::gtest_main)
+  target_link_libraries(netft_options_test PRIVATE netft_cli_cli GTest::gtest_main)
   netft_enable_warnings(netft_options_test)
   netft_enable_sanitizers(netft_options_test)
 
@@ -114,14 +135,14 @@ if(BUILD_TESTING)
 
   add_executable(netft_cli_schema_test test/unit/cli_schema_test.cpp)
   target_compile_features(netft_cli_schema_test PRIVATE cxx_std_17)
-  target_link_libraries(netft_cli_schema_test PRIVATE netft_cli_options GTest::gtest_main)
+  target_link_libraries(netft_cli_schema_test PRIVATE netft_cli_cli GTest::gtest_main)
   netft_enable_warnings(netft_cli_schema_test)
   netft_enable_sanitizers(netft_cli_schema_test)
   add_test(NAME netft_cli_schema COMMAND netft_cli_schema_test)
 
   add_executable(netft_cli_parser_test test/unit/cli_parser_test.cpp)
   target_compile_features(netft_cli_parser_test PRIVATE cxx_std_17)
-  target_link_libraries(netft_cli_parser_test PRIVATE netft_cli_options GTest::gtest_main)
+  target_link_libraries(netft_cli_parser_test PRIVATE netft_cli_cli GTest::gtest_main)
   netft_enable_warnings(netft_cli_parser_test)
   netft_enable_sanitizers(netft_cli_parser_test)
   add_test(NAME netft_cli_parser COMMAND netft_cli_parser_test)
@@ -129,7 +150,7 @@ if(BUILD_TESTING)
   add_executable(netft_config_resolver_test test/unit/config_resolver_test.cpp)
   target_compile_features(netft_config_resolver_test PRIVATE cxx_std_17)
   target_link_libraries(netft_config_resolver_test PRIVATE
-    netft_cli_options
+    netft_cli_cli
     GTest::gtest_main
   )
   netft_enable_warnings(netft_config_resolver_test)
@@ -147,7 +168,7 @@ if(BUILD_TESTING)
   )
   target_link_libraries(netft_test_support PUBLIC
     netft_core
-    netft_cli_options
+    netft_cli_cli
     GTest::gtest
     nlohmann_json::nlohmann_json
   )
@@ -167,11 +188,24 @@ if(BUILD_TESTING)
     add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
   endforeach()
 
-  foreach(test_name IN ITEMS clock interrupt terminal)
+  foreach(test_name IN ITEMS terminal)
     add_executable(netft_${test_name}_test test/unit/${test_name}_test.cpp)
     target_compile_features(netft_${test_name}_test PRIVATE cxx_std_17)
     target_link_libraries(netft_${test_name}_test PRIVATE
       netft_cli_output
+      netft_test_support
+      GTest::gtest_main
+    )
+    netft_enable_warnings(netft_${test_name}_test)
+    netft_enable_sanitizers(netft_${test_name}_test)
+    add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
+  endforeach()
+
+  foreach(test_name IN ITEMS clock interrupt)
+    add_executable(netft_${test_name}_test test/unit/${test_name}_test.cpp)
+    target_compile_features(netft_${test_name}_test PRIVATE cxx_std_17)
+    target_link_libraries(netft_${test_name}_test PRIVATE
+      netft_cli_stream
       netft_test_support
       GTest::gtest_main
     )
@@ -204,13 +238,24 @@ if(BUILD_TESTING)
   add_executable(netft_latest_sample_test test/unit/latest_sample_test.cpp)
   target_compile_features(netft_latest_sample_test PRIVATE cxx_std_17)
   target_link_libraries(netft_latest_sample_test PRIVATE
-    netft_cli_output
+    netft_cli_stream
     netft_test_support
     GTest::gtest_main
   )
   netft_enable_warnings(netft_latest_sample_test)
   netft_enable_sanitizers(netft_latest_sample_test)
   add_test(NAME netft_latest_sample COMMAND netft_latest_sample_test)
+
+  add_executable(netft_acquisition_test test/unit/acquisition_test.cpp)
+  target_compile_features(netft_acquisition_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_acquisition_test PRIVATE
+    netft_cli_stream
+    netft_test_support
+    GTest::gtest_main
+  )
+  netft_enable_warnings(netft_acquisition_test)
+  netft_enable_sanitizers(netft_acquisition_test)
+  add_test(NAME netft_acquisition COMMAND netft_acquisition_test)
 
   add_executable(netft_line_reader_test test/unit/line_reader_test.cpp)
   target_compile_features(netft_line_reader_test PRIVATE cxx_std_17)

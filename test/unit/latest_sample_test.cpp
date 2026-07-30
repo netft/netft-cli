@@ -1,4 +1,4 @@
-#include "monitor/latest_sample.hpp"
+#include "stream/latest_sample.hpp"
 
 #include "platform/interrupt.hpp"
 #include "support/records.hpp"
