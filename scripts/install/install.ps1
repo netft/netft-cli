@@ -67,6 +67,7 @@ function Invoke-ReleaseDownload {
     Add-Type -AssemblyName System.Net.Http
     $Handler = [Net.Http.HttpClientHandler]::new()
     $Handler.AllowAutoRedirect = $false
+    $Handler.UseProxy = -not $IsLoopbackFixture
     $Client = [Net.Http.HttpClient]::new($Handler, $true)
     $Current = $Uri
     $RedirectCount = 0
