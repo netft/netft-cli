@@ -245,28 +245,34 @@ jobs:
           set -euo pipefail
           metadata="${RUNNER_TEMP}/release-metadata.json"
           asset_ids="${RUNNER_TEMP}/release-asset-ids"
-          release_endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}"
-          if gh api "${release_endpoint}" \
-              >"${metadata}" 2>/dev/null; then
-            release_id="$(
-              python3 tools/release_inventory.py release-id \
-                --metadata "${metadata}"
-            )"
-          else
+          if ! release_api_url="$(
+            gh release view "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json apiUrl \
+              --jq .apiUrl \
+              2>/dev/null
+          )"; then
             gh release create "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
               --draft \
               --notes-file release/RELEASE_NOTES.md
-            gh api "${release_endpoint}" >"${metadata}"
-            release_id="$(
-              python3 tools/release_inventory.py release-id \
-                --metadata "${metadata}"
+            release_api_url="$(
+              gh release view "${GITHUB_REF_NAME}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json apiUrl \
+                --jq .apiUrl
             )"
           fi
+          gh api "${release_api_url}" >"${metadata}"
+          release_id="$(
+            python3 tools/release_inventory.py release-id \
+              --metadata "${metadata}"
+          )"
+          release_endpoint="repos/${GITHUB_REPOSITORY}/releases/${release_id}"
 
           gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            "${release_endpoint}" \
             -F draft=true \
             -F prerelease=false \
             >/dev/null
