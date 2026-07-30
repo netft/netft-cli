@@ -244,9 +244,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Location", redirect.read_text(encoding="utf-8"))
             self.send_header("Content-Length", "0")
-            self.send_header("Connection", "close")
             self.end_headers()
-            self.close_connection = True
             return
         if (
             self.path == "/releases/download/v0.1.0/SHA256SUMS"
@@ -275,10 +273,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
-        self.close_connection = True
+        self.wfile.flush()
 
     def log_message(self, *_args):
         pass
