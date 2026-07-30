@@ -327,15 +327,9 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     } else {
         ""
     }
-    $ServerDiagnostics = if (Test-Path -LiteralPath $ServerErr) {
-        "server: " + [IO.File]::ReadAllText($ServerErr)
-    } else {
-        ""
-    }
     $ExplicitDiagnostics = @(
         $Explicit.Output,
-        $RequestDiagnostics,
-        $ServerDiagnostics
+        $RequestDiagnostics
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     Assert-True ($Explicit.ExitCode -eq 0) (
         "Explicit install failed: " + [string]::Join(" | ", $ExplicitDiagnostics)
