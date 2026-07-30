@@ -52,6 +52,8 @@ function(netft_prepare_static_curl)
       "Pinned static curl library" FORCE)
   set(CURL_LIBRARY_RELEASE "${_netft_curl_library}" CACHE FILEPATH
       "Pinned static curl release library" FORCE)
+  set(CURL_NO_CURL_CMAKE TRUE CACHE BOOL
+      "Ignore curl package metadata for the validated static archive" FORCE)
   set(NETFT_CLI_STATIC_CURL_LIBRARY "${_netft_curl_library}" CACHE INTERNAL
       "Validated static curl library" FORCE)
 endfunction()
