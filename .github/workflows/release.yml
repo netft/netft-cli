@@ -275,6 +275,7 @@ jobs:
             "${release_endpoint}" \
             -F draft=true \
             -F prerelease=false \
+            -f body="$(cat release/RELEASE_NOTES.md)" \
             >/dev/null
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-draft \
@@ -296,17 +297,18 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
           done <"${asset_ids}"
 
-          gh release edit "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --draft \
-            --notes-file release/RELEASE_NOTES.md
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-draft \
             --metadata "${metadata}" \
             --expected-release-id "${release_id}"
-          gh release upload "${GITHUB_REF_NAME}" \
-            release/dist/* \
-            --repo "${GITHUB_REPOSITORY}"
+          for asset_path in release/dist/*; do
+            asset_name="$(basename "${asset_path}")"
+            gh api --method POST \
+              -H "Content-Type: application/octet-stream" \
+              --input "${asset_path}" \
+              "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${asset_name}" \
+              >/dev/null
+          done
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-remote \
             --metadata "${metadata}" \
