@@ -84,7 +84,7 @@ def test_monitor_timeout_is_stream_error() -> None:
             "--timeout",
             "50ms",
             "--duration",
-            "500ms",
+            "100ms",
             "--format",
             "ndjson",
         )
@@ -213,7 +213,7 @@ def test_monitor_writes_parseable_ndjson_to_stdout_only() -> None:
             "--rdt-port",
             str(sensor.rdt_port),
             "--duration",
-            "100ms",
+            "500ms",
             "--rate",
             "50",
             "--format",
