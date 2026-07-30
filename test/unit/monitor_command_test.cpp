@@ -88,6 +88,24 @@ TEST(MonitorCommand, BoundedDurationCompletesSuccessfullyWithoutPastEndRecord) {
   EXPECT_EQ(backend.session().stop_calls(), 1U);
 }
 
+TEST(MonitorCommand, BoundedDurationStartsAfterTheFirstSampleIsReady) {
+  test::FakeBackend backend;
+  backend.set_configuration(test::configuration());
+  backend.session().set_samples({test::sample(8)});
+  backend.session().set_health(test::health());
+  test::FakeClock clock;
+  backend.session().set_before_first_sample([&clock] { clock.set_now(Clock::TimePoint{200ms}); });
+  test::MemoryOutput output(false);
+  InterruptFlag interrupt;
+
+  EXPECT_EQ(run_monitor(test::monitor_for(100ms), backend, output.context(), interrupt, clock), 0);
+
+  EXPECT_EQ(test::parse_ndjson(output.standard_output_text()).size(), 2U);
+  ASSERT_EQ(clock.deadlines().size(), 2U);
+  EXPECT_EQ(clock.deadlines()[0].time_since_epoch(), 250ms);
+  EXPECT_EQ(clock.deadlines()[1].time_since_epoch(), 300ms);
+}
+
 TEST(MonitorCommand, SkipsMissedDeadlinesInsteadOfReplayingHistory) {
   test::FakeBackend backend;
   backend.set_configuration(test::configuration());

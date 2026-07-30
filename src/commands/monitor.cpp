@@ -231,15 +231,15 @@ Clock::TimePoint first_deadline_after(Clock::TimePoint origin, Clock::Duration p
 int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputContext &output,
                 InterruptFlag &interrupt, Clock &clock) {
   const auto format = resolve_format(options, output);
-  const auto origin = clock.now();
+  const auto record_origin = clock.now();
   const auto period = period_for(options.rate_hz);
-  const auto first_deadline = checked_add(origin, period, "rate");
   const auto duration = options.duration
                             ? std::optional<Clock::Duration>{duration_ticks(*options.duration)}
                             : std::nullopt;
-  const auto end = duration
-                       ? std::optional<Clock::TimePoint>{checked_add(origin, *duration, "duration")}
-                       : std::nullopt;
+  static_cast<void>(checked_add(record_origin, period, "rate"));
+  if (duration) {
+    static_cast<void>(checked_add(record_origin, *duration, "duration"));
+  }
   OutputHandle destination = options.output.has_value()
                                  ? OutputHandle::file(*options.output)
                                  : OutputHandle::standard(output.standard_output);
@@ -269,6 +269,12 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
     throw AppError{ExitCode::Stream, "sensor stream produced no sample before timeout"};
   }
 
+  const auto schedule_origin = clock.now();
+  const auto first_deadline = checked_add(schedule_origin, period, "rate");
+  const auto end =
+      duration
+          ? std::optional<Clock::TimePoint>{checked_add(schedule_origin, *duration, "duration")}
+          : std::nullopt;
   SampleOutput sample_output(format, destination,
                              !options.output.has_value() && output.output_is_terminal);
   auto deadline = first_deadline;
@@ -286,7 +292,7 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
 
     auto now = clock.now();
     if (deadline < now) {
-      deadline = first_deadline_after(origin, period, now);
+      deadline = first_deadline_after(schedule_origin, period, now);
     }
     if (end && deadline > *end) {
       return finish(0);
@@ -305,8 +311,8 @@ int run_monitor(const MonitorOptions &options, SensorBackend &backend, OutputCon
     if (!sample) {
       throw AppError{ExitCode::Stream, "sensor stream has no current sample"};
     }
-    sample_output.write(make_sample_record(*sample, health, origin));
-    deadline = first_deadline_after(origin, period, clock.now());
+    sample_output.write(make_sample_record(*sample, health, record_origin));
+    deadline = first_deadline_after(schedule_origin, period, clock.now());
   }
 }
 
