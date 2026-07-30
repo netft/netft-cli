@@ -32,7 +32,10 @@ include(cmake/Warnings.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/NetftCore.cmake)
 
-add_library(netft_cli_options src/cli/options.cpp)
+add_library(netft_cli_options
+  src/cli/parser.cpp
+  src/cli/schema.cpp
+)
 target_compile_features(netft_cli_options PUBLIC cxx_std_17)
 target_include_directories(netft_cli_options PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 netft_enable_warnings(netft_cli_options)
@@ -106,6 +109,20 @@ if(BUILD_TESTING)
   netft_enable_sanitizers(netft_options_test)
 
   add_test(NAME netft_options COMMAND netft_options_test)
+
+  add_executable(netft_cli_schema_test test/unit/cli_schema_test.cpp)
+  target_compile_features(netft_cli_schema_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_cli_schema_test PRIVATE netft_cli_options GTest::gtest_main)
+  netft_enable_warnings(netft_cli_schema_test)
+  netft_enable_sanitizers(netft_cli_schema_test)
+  add_test(NAME netft_cli_schema COMMAND netft_cli_schema_test)
+
+  add_executable(netft_cli_parser_test test/unit/cli_parser_test.cpp)
+  target_compile_features(netft_cli_parser_test PRIVATE cxx_std_17)
+  target_link_libraries(netft_cli_parser_test PRIVATE netft_cli_options GTest::gtest_main)
+  netft_enable_warnings(netft_cli_parser_test)
+  netft_enable_sanitizers(netft_cli_parser_test)
+  add_test(NAME netft_cli_parser COMMAND netft_cli_parser_test)
 
   add_library(netft_test_support
     test/support/fake_backend.cpp

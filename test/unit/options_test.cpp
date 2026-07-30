@@ -1,5 +1,6 @@
 #include "app/error.hpp"
 #include "cli/options.hpp"
+#include "cli/parser.hpp"
 
 #include <gtest/gtest.h>
 

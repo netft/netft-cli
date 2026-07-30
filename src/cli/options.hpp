@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -46,8 +47,31 @@ struct BiasOptions {
   bool assume_yes{false};
 };
 
-using Action = std::variant<ShowHelp, ShowVersion, InfoOptions, MonitorOptions, BiasOptions>;
+struct CheckOptions {
+  ConnectionOptions connection;
+  OutputFormat format{OutputFormat::Automatic};
+  std::optional<std::filesystem::path> output;
+  std::chrono::duration<double> duration{5.0};
+  std::optional<double> min_rate_hz;
+  std::optional<double> max_loss_percent;
+  std::optional<std::uint64_t> max_reconnects;
+};
 
-Action parse_arguments(const std::vector<std::string_view> &arguments);
+struct RecordOptions {
+  ConnectionOptions connection;
+  OutputFormat format{OutputFormat::Automatic};
+  std::filesystem::path output;
+  std::optional<std::chrono::duration<double>> duration;
+  std::optional<std::uint64_t> count;
+};
+
+enum class CompletionShell { Bash, Zsh, Fish, PowerShell };
+
+struct CompletionOptions {
+  CompletionShell shell;
+};
+
+using Action = std::variant<ShowHelp, ShowVersion, InfoOptions, MonitorOptions, CheckOptions,
+                            RecordOptions, BiasOptions, CompletionOptions>;
 
 } // namespace netft_cli

@@ -1,6 +1,7 @@
 #include "application.hpp"
 
 #include "app/error.hpp"
+#include "cli/parser.hpp"
 #include "commands/bias.hpp"
 #include "commands/info.hpp"
 #include "commands/monitor.hpp"
@@ -139,6 +140,9 @@ int run_application(const std::vector<std::string_view> &arguments, AppEnvironme
                  [&](const BiasOptions &value) {
                    return run_bias(value, environment.backend(), environment.output(),
                                    environment.confirmation(), environment.interrupt());
+                 },
+                 [&](const auto &) -> int {
+                   throw AppError{ExitCode::Usage, "command is not available yet"};
                  }},
       action);
 }
