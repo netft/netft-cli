@@ -103,6 +103,8 @@ target_link_libraries(netft_cli_diagnostics PUBLIC netft_cli_stream)
 netft_enable_warnings(netft_cli_diagnostics)
 netft_enable_sanitizers(netft_cli_diagnostics)
 
+target_link_libraries(netft_cli_output PUBLIC netft_cli_diagnostics)
+
 add_library(netft_cli_recording
   src/recording/csv_writer.cpp
   src/recording/ndjson_writer.cpp
