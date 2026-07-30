@@ -57,8 +57,7 @@ public:
 #else
     struct sigaction action{};
     action.sa_handler = request_interrupt;
-    if (::sigemptyset(&action.sa_mask) != 0 ||
-        ::sigaction(SIGINT, &action, &previous_action_) != 0) {
+    if (sigemptyset(&action.sa_mask) != 0 || ::sigaction(SIGINT, &action, &previous_action_) != 0) {
       active_flag.store(nullptr, std::memory_order_release);
       throw std::runtime_error("failed to install signal interrupt handler");
     }

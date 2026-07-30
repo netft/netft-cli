@@ -142,6 +142,27 @@ if(BUILD_TESTING)
     add_test(NAME netft_${test_name} COMMAND netft_${test_name}_test)
   endforeach()
 
+  if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_executable(netft_interrupt_signal_macro_test
+      src/platform/interrupt.cpp
+      test/unit/interrupt_test.cpp
+    )
+    target_compile_features(netft_interrupt_signal_macro_test PRIVATE cxx_std_17)
+    target_include_directories(netft_interrupt_signal_macro_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_compile_options(netft_interrupt_signal_macro_test PRIVATE
+      "-include${CMAKE_CURRENT_SOURCE_DIR}/test/support/sigemptyset_macro.hpp"
+    )
+    target_link_libraries(netft_interrupt_signal_macro_test PRIVATE
+      Threads::Threads
+      GTest::gtest_main
+    )
+    netft_enable_warnings(netft_interrupt_signal_macro_test)
+    netft_enable_sanitizers(netft_interrupt_signal_macro_test)
+    add_test(NAME netft_interrupt_signal_macro COMMAND netft_interrupt_signal_macro_test)
+  endif()
+
   add_executable(netft_latest_sample_test test/unit/latest_sample_test.cpp)
   target_compile_features(netft_latest_sample_test PRIVATE cxx_std_17)
   target_link_libraries(netft_latest_sample_test PRIVATE

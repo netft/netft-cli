@@ -35,7 +35,7 @@ TEST(InterruptHandler, RequestsFlagAndRestoresPreviousHandler) {
 
   struct sigaction previous_action{};
   previous_action.sa_handler = record_previous_handler;
-  ASSERT_EQ(::sigemptyset(&previous_action.sa_mask), 0);
+  ASSERT_EQ(sigemptyset(&previous_action.sa_mask), 0);
   previous_action.sa_flags = 0;
   ASSERT_EQ(::sigaction(SIGINT, &previous_action, nullptr), 0);
 
