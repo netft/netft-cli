@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Sequence
 
 REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
-REQUIRED_TAG = "v0.3.0"
-REQUIRED_COMMIT = "46ee05639f818a17c1cfe604d0d77b1feb8f9b2b"
+REQUIRED_TAG = "v0.3.1"
+REQUIRED_COMMIT = "859eeda8b077093f9bc49d9c1e5506c334647e7b"
 SELECTED = ("LICENSE", "include", "src")
 ADAPTATION_NAME = "ADAPTATIONS.patch"
 ADAPTATION_FORMAT = "git-diff-unified-zero"
@@ -115,10 +115,28 @@ def snapshot_files(root: Path) -> list[Path]:
 
 def apply_adaptation(destination: Path, patch: Path) -> None:
     """Apply the declared git-diff adaptation to the exact copied snapshot."""
+    worktree = subprocess.run(
+        ["git", "-C", str(destination), "rev-parse", "--show-toplevel"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if worktree.returncode == 0:
+        working_directory = Path(worktree.stdout.strip())
+        patch_directory = (destination / "netft").relative_to(working_directory)
+    else:
+        working_directory = destination
+        patch_directory = Path("netft")
     try:
         subprocess.run(
-            ["git", "apply", "--unidiff-zero", "--directory=netft", str(patch.resolve())],
-            cwd=destination,
+            [
+                "git",
+                "apply",
+                "--unidiff-zero",
+                f"--directory={patch_directory.as_posix()}",
+                str(patch.resolve()),
+            ],
+            cwd=working_directory,
             check=True,
             capture_output=True,
             text=True,
