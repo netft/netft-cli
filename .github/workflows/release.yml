@@ -244,31 +244,41 @@ jobs:
         run: |
           set -euo pipefail
           metadata="${RUNNER_TEMP}/release-metadata.json"
+          release_pages="${RUNNER_TEMP}/release-pages.json"
           asset_ids="${RUNNER_TEMP}/release-asset-ids"
-          release_endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}"
-          if gh api "${release_endpoint}" \
-              >"${metadata}" 2>/dev/null; then
-            release_id="$(
-              python3 tools/release_inventory.py release-id \
-                --metadata "${metadata}"
-            )"
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            >"${release_pages}"
+          release_api_url="$(
+            RELEASE_TAG="${GITHUB_REF_NAME}" \
+              python3 -c \
+                'import json, os, sys; pages=json.load(sys.stdin); tag=os.environ["RELEASE_TAG"]; matches=[release for page in pages for release in page if release.get("tag_name")==tag or (release.get("draft") is True and release.get("name")==tag)]; len(matches)<=1 or sys.exit("duplicate release identity"); (not matches or matches[0].get("draft") is True) or sys.exit("release is already published"); print(matches[0]["url"] if matches else "")' \
+                <"${release_pages}"
+          )"
+          if [[ -n "${release_api_url}" ]]; then
+            gh api "${release_api_url}" >"${metadata}"
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --verify-tag \
-              --draft \
-              --notes-file release/RELEASE_NOTES.md
-            gh api "${release_endpoint}" >"${metadata}"
-            release_id="$(
-              python3 tools/release_inventory.py release-id \
-                --metadata "${metadata}"
-            )"
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${GITHUB_REF_NAME}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              -f name="${GITHUB_REF_NAME}" \
+              -F draft=true \
+              -F prerelease=false \
+              -f body="$(cat release/RELEASE_NOTES.md)" \
+              >"${metadata}"
           fi
+          release_id="$(
+            python3 tools/release_inventory.py release-id \
+              --metadata "${metadata}"
+          )"
+          release_endpoint="repos/${GITHUB_REPOSITORY}/releases/${release_id}"
 
           gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            "${release_endpoint}" \
             -F draft=true \
             -F prerelease=false \
+            -f body="$(cat release/RELEASE_NOTES.md)" \
             >/dev/null
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-draft \
@@ -290,17 +300,18 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
           done <"${asset_ids}"
 
-          gh release edit "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --draft \
-            --notes-file release/RELEASE_NOTES.md
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-draft \
             --metadata "${metadata}" \
             --expected-release-id "${release_id}"
-          gh release upload "${GITHUB_REF_NAME}" \
-            release/dist/* \
-            --repo "${GITHUB_REPOSITORY}"
+          for asset_path in release/dist/*; do
+            asset_name="$(basename "${asset_path}")"
+            gh api --method POST \
+              -H "Content-Type: application/octet-stream" \
+              --input "${asset_path}" \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${asset_name}" \
+              >/dev/null
+          done
           gh api "${release_endpoint}" >"${metadata}"
           python3 tools/release_inventory.py validate-remote \
             --metadata "${metadata}" \
@@ -310,6 +321,8 @@ jobs:
 
   smoke:
     needs: [assemble, draft_release]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

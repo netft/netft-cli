@@ -18,6 +18,7 @@ TARGET_EXTENSIONS = {
     "windows-x86_64": ".zip",
 }
 VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+TEMPORARY_TAG_PATTERN = re.compile(r"untagged-[0-9a-z]+")
 
 
 class ReleaseInventoryError(RuntimeError):
@@ -113,7 +114,14 @@ def validate_remote_inventory(
     assets = _validated_assets(metadata, expected_release_id)
     names = [asset["name"] for asset in assets]
     expected = expected_asset_names(version)
-    if not isinstance(metadata, dict) or metadata.get("tag_name") != f"v{version}":
+    expected_tag = f"v{version}"
+    if not isinstance(metadata, dict) or metadata.get("name") != expected_tag:
+        raise ReleaseInventoryError("release name does not match the version")
+    tag_name = metadata.get("tag_name")
+    if not isinstance(tag_name, str) or (
+        tag_name != expected_tag
+        and TEMPORARY_TAG_PATTERN.fullmatch(tag_name) is None
+    ):
         raise ReleaseInventoryError("release tag does not match the version")
     if len(names) != len(set(names)):
         raise ReleaseInventoryError("release contains duplicate asset names")
