@@ -141,6 +141,8 @@ TEST(CliIntegration, RecordWritesEveryAcceptedSampleAndFinalizesFile) {
   std::ifstream stream(path, std::ios::binary);
   const std::string contents{std::istreambuf_iterator<char>{stream},
                              std::istreambuf_iterator<char>{}};
+  stream.close();
+  ASSERT_TRUE(stream);
   const auto documents = parse_ndjson(contents);
   EXPECT_EQ(documents.size(), 5U);
   EXPECT_TRUE(sensor.wait_for_stop_streaming());
