@@ -68,16 +68,24 @@ Never commit a laboratory sensor address, credentials, recordings, or private ne
 
 ## Core synchronization
 
-The private core snapshot comes from [netft-cpp](https://github.com/netft/netft-cpp). The current synchronization command accepts only `netft-cpp` tag `v0.3.1` at commit `859eeda8b077093f9bc49d9c1e5506c334647e7b`; it applies the checksum-pinned `core/ADAPTATIONS.patch` to reproduce the existing adapted snapshot.
+The private core snapshot comes from [netft-cpp](https://github.com/netft/netft-cpp). The current synchronization command accepts only `netft-cpp` tag `v0.3.2` at commit `95f0e721b885a2fc88e028f41987607747a42085`; it applies the checksum-pinned `core/ADAPTATIONS.patch` to reproduce the existing adapted snapshot.
 
 To reproduce the current snapshot from a clean checkout at that exact tag:
 
 ```bash
-python tools/sync_core.py sync --source <path-to-netft-cpp> --tag v0.3.1
+python tools/sync_core.py sync --source <path-to-netft-cpp> --tag v0.3.2
 python tools/sync_core.py verify
 ```
 
 Do not edit the generated `core/netft` tree manually. Shared core behavior changes must be accepted in `netft-cpp` first; the adaptation patch is limited to reviewed CLI-specific integration and must not bypass that upstream-first rule.
+
+The current adaptation supports the confirmed `bias` command's two-session
+workflow. It can retain the stopped preview session's UDP socket until that
+session is destroyed, preventing delayed preview datagrams from being
+delivered to a newly opened session that reused the same local port, and it
+can send one bias command before starting that second fail-stop stream. It
+does not change protocol parsing, calibration, sample conversion, health, or
+recovery semantics.
 
 A core upgrade is a maintainer-controlled change. The maintainer updates the pinned tag and commit in `tools/sync_core.py` and the corresponding tests, rebuilds and audits `core/ADAPTATIONS.patch` against that exact upstream base, and updates its pinned SHA-256. The synchronization command then regenerates `core/netft`, `core/UPSTREAM`, and `core/MANIFEST.sha256`; notices and snapshot tests are updated and the complete snapshot verification is run before the files are committed together.
 

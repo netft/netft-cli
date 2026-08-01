@@ -98,7 +98,6 @@ TEST(ClientSocketIsolation, RetainedPreviewPortAndBacklogStaySeparateFromBiasedC
   ASSERT_TRUE(preview.wait_for_first_sample(500ms));
   preview.stop();
   ASSERT_EQ(sensor.receive_command(preview_peer), 0x0000);
-  const auto preview_port = preview.local_port();
   sensor.send_record(preview_peer, 99);
 
   auto biased_config = config_for(sensor);
@@ -109,7 +108,7 @@ TEST(ClientSocketIsolation, RetainedPreviewPortAndBacklogStaySeparateFromBiasedC
   sockaddr_in biased_peer{};
   ASSERT_EQ(sensor.receive_command(biased_peer), 0x0042);
   ASSERT_EQ(sensor.receive_command(biased_peer), 0x0002);
-  EXPECT_NE(preview_port, biased.local_port());
+  EXPECT_NE(preview_peer.sin_port, biased_peer.sin_port);
   sensor.send_record(biased_peer, 2);
   ASSERT_TRUE(biased.wait_for_first_sample(500ms));
   EXPECT_EQ(delivered.load(), 2U);

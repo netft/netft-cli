@@ -24,12 +24,13 @@ public:
 
   void start(SampleCallback callback);
   void stop() noexcept;
+  [[nodiscard]] bool called_from_worker_thread() const noexcept;
+  void bias();
   bool wait_for_first_sample(std::chrono::duration<double> timeout);
   bool faulted() const noexcept;
   FaultCode fault_code() const noexcept;
   HealthSnapshot health() const;
   std::optional<Sample> latest_sample() const;
-  std::uint16_t local_port() const;
 
 private:
   enum class SessionResult {

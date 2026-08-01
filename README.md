@@ -3,8 +3,8 @@
 [![CI](https://github.com/netft/netft-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/netft/netft-cli/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/netft/netft-cli/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/netft/netft-cli/actions/workflows/codeql.yml)
 [![Coverage](https://codecov.io/gh/netft/netft-cli/graph/badge.svg?branch=main)](https://codecov.io/gh/netft/netft-cli)
-[![Release](https://img.shields.io/github/v/release/netft/netft-cli?display_name=tag&sort=semver&style=flat)](https://github.com/netft/netft-cli/releases)
-[![License](https://img.shields.io/github/license/netft/netft-cli?label=license&style=flat)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/netft/netft-cli?display_name=tag&sort=semver)](https://github.com/netft/netft-cli/releases)
+[![License](https://img.shields.io/github/license/netft/netft-cli?label=license)](LICENSE)
 
 `netft-cli` is a standalone command-line application for commissioning, diagnosing, monitoring, recording, and biasing ATI Net F/T Ethernet sensors. It discovers the active calibration and native units from the sensor before consuming the RDT force/torque stream.
 

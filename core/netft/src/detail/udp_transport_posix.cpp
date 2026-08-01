@@ -158,21 +158,6 @@ void UdpTransport::shutdown() noexcept {
   }
 }
 
-std::uint16_t UdpTransport::local_port() const {
-  std::scoped_lock lock(mutex_);
-  sockaddr_storage address{};
-  socklen_t size = sizeof(address);
-  if (socket_ == kInvalidSocket ||
-      ::getsockname(static_cast<int>(socket_), reinterpret_cast<sockaddr *>(&address), &size) !=
-          0) {
-    throw socket_error("failed to read UDP local port");
-  }
-  if (address.ss_family == AF_INET) {
-    return ntohs(reinterpret_cast<const sockaddr_in *>(&address)->sin_port);
-  }
-  return ntohs(reinterpret_cast<const sockaddr_in6 *>(&address)->sin6_port);
-}
-
 void UdpTransport::close() noexcept {
   std::scoped_lock lock(mutex_);
   shutdown_requested_ = true;

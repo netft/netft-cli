@@ -34,7 +34,6 @@ public:
                       std::chrono::duration<double> timeout);
   void shutdown() noexcept;
   void close() noexcept;
-  std::uint16_t local_port() const;
 
   void set_wait_started_test_hook(WaitStartedTestHook hook, void *context) {
     std::scoped_lock lock(mutex_);

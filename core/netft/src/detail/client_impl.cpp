@@ -286,6 +286,25 @@ void Client::Impl::stop() noexcept {
   }
 }
 
+bool Client::Impl::called_from_worker_thread() const noexcept {
+  std::scoped_lock lifecycle_lock(lifecycle_mutex_);
+  return worker_.joinable() && worker_.get_id() == std::this_thread::get_id();
+}
+
+void Client::Impl::bias() {
+  std::scoped_lock command_lock(command_mutex_);
+  std::scoped_lock record_lock(record_mutex_);
+  {
+    std::scoped_lock data_lock(data_mutex_);
+    if (stopping_ || !session_started_ || faulted() || health_.state != ClientState::Streaming) {
+      throw NotConnectedError("client is not streaming");
+    }
+  }
+  transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
+  transport_.send(detail::encode_request(detail::Command::StartRealtime));
+  rdt_sequence_.reset();
+}
+
 bool Client::Impl::wait_for_first_sample(const std::chrono::duration<double> timeout) {
   std::unique_lock<std::mutex> data_lock(data_mutex_);
   const auto captured_generation = generation_;
@@ -333,8 +352,6 @@ std::optional<Sample> Client::Impl::latest_sample() const {
   std::scoped_lock data_lock(data_mutex_);
   return latest_;
 }
-
-std::uint16_t Client::Impl::local_port() const { return transport_.local_port(); }
 
 SensorConfiguration Client::Impl::configuration_for_session() {
   if (config_.calibration_override) {

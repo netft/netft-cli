@@ -6,8 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- Updated the private netft-cpp core to v0.3.1 so fail-stop commands do not consume
-  stalled or backward FT-sequence samples.
+- Updated the private netft-cpp core to v0.3.2 and reduced the local adaptation
+  to the confirmed bias command's two-session isolation requirements.
 
 ## 0.2.0 - 2026-07-30
 
