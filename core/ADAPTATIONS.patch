@@ -8,14 +8,14 @@ index feb6365..d26123c 100644
 +  StartupMode startup_mode{StartupMode::Stream};
 +  bool retain_bound_socket_until_destruction{false};
 diff --git a/src/detail/client_impl.cpp b/src/detail/client_impl.cpp
-index 9387057..2aa3278 100644
+index 5ebc20c..63b03d4 100644
 --- a/src/detail/client_impl.cpp
 +++ b/src/detail/client_impl.cpp
-@@ -455,0 +456,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
+@@ -450,0 +451,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
 +    if (config_.startup_mode == StartupMode::BiasAndStream) {
 +      transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
 +    }
-@@ -715 +718,3 @@ void Client::Impl::close_session() noexcept {
+@@ -710 +713,3 @@ void Client::Impl::close_session() noexcept {
 -  transport_.close();
 +  if (!config_.retain_bound_socket_until_destruction) {
 +    transport_.close();

@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- Updated the private netft-cpp core to v0.3.2 and reduced the local adaptation
+- Updated the private netft-cpp core to v0.3.3 and reduced the local adaptation
   to the confirmed bias command's two-session isolation requirements.
 
 ## 0.2.0 - 2026-07-30

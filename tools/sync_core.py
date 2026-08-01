@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Sequence
 
 REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
-REQUIRED_TAG = "v0.3.2"
-REQUIRED_COMMIT = "95f0e721b885a2fc88e028f41987607747a42085"
+REQUIRED_TAG = "v0.3.3"
+REQUIRED_COMMIT = "3259b8576b16fb150b51e9ef9090366c5e6efcba"
 SELECTED = ("LICENSE", "include", "src")
 ADAPTATION_NAME = "ADAPTATIONS.patch"
 ADAPTATION_FORMAT = "git-diff-unified-zero"
-REQUIRED_ADAPTATION_SHA256 = "b17309463b64916fc3e2cfa66b7817fec5559ec2d2cff3584904973cec717fe6"
+REQUIRED_ADAPTATION_SHA256 = "07c596386c68ccd799056247d28871b41348aa56565a9504e07945cf3d7bfade"
 
 
 def canonical_adaptation() -> Path:
