@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-14
+
 ### Fixed
 
 - Updated the private netft-cpp core to v0.3.3 and reduced the local adaptation

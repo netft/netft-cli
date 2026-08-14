@@ -203,8 +203,8 @@ try {
     Assert-True (
         $LASTEXITCODE -eq 0 -and
         $ProductionVersion.Count -eq 1 -and
-        $ProductionVersion[0] -ceq "netft 0.2.0"
-    ) "NETFT_EXECUTABLE is not the production 0.2.0 executable."
+        $ProductionVersion[0] -ceq "netft 0.2.1"
+    ) "NETFT_EXECUTABLE is not the production 0.2.1 executable."
     Publish-Release "0.2.0" $GoodBinary
 
     $Listener = [Net.Sockets.TcpListener]::new(
