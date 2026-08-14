@@ -13,7 +13,6 @@ body:
     attributes:
       label: netft version
       description: Use the installed version from `netft --version` or a commit ID.
-      placeholder: 0.1.0
     validations:
       required: true
   - type: dropdown
