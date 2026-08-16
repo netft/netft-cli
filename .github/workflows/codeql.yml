@@ -24,10 +24,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347
         with:
           cache: true
-      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
           languages: c-cpp
           build-mode: manual
@@ -36,4 +36,4 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTING=OFF
           pixi run cmake --build build/codeql
-      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
