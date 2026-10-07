@@ -209,3 +209,15 @@ def test_release_notes_do_not_insert_fixed_width_breaks() -> None:
     bullet_lines = [line for line in notes.splitlines() if line.startswith("- ")]
     assert len(bullet_lines) == 1
     assert len(bullet_lines[0]) > 120
+
+
+def test_stable_version_rules_match_installer_contract() -> None:
+    from tools.package_release import VERSION_PATTERN as package_pattern
+    from tools.release_inventory import expected_asset_names, ReleaseInventoryError
+    for version in ("0.0.0", "0.2.2", "10.20.30"):
+        assert package_pattern.fullmatch(version)
+        assert len(expected_asset_names(version)) == 6
+    for version in ("00.2.1", "0.02.1", "0.2.01", "0.2.1-rc.1", "v0.2.1", "0.2.1+build"):
+        assert not package_pattern.fullmatch(version)
+        with pytest.raises(ReleaseInventoryError):
+            expected_asset_names(version)

@@ -23,7 +23,7 @@ TARGETS: Final = {
     "macos-arm64": ".tar.gz",
     "windows-x86_64": ".zip",
 }
-VERSION_PATTERN: Final = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+VERSION_PATTERN: Final = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 
 
 def _source_date_epoch() -> int:

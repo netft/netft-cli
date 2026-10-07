@@ -17,7 +17,7 @@ TARGET_EXTENSIONS = {
     "macos-arm64": ".tar.gz",
     "windows-x86_64": ".zip",
 }
-VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+VERSION_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 TEMPORARY_TAG_PATTERN = re.compile(r"untagged-[0-9a-z]+")
 
 
