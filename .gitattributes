@@ -1,1 +1,3 @@
 core/ADAPTATIONS.patch text eol=lf
+# Preserve the byte inventory when Windows enables core.autocrlf.
+/core/netft/** -text
