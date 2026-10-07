@@ -35,6 +35,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify controlled core snapshot
+        run: python tools/sync_core.py verify
+
       - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
         if: startsWith(matrix.target, 'linux-')
         with:
