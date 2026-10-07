@@ -43,6 +43,8 @@ void remove_recording(const std::filesystem::path &path) {
   std::error_code error;
   std::filesystem::remove(path, error);
   std::filesystem::remove(path.string() + ".partial", error);
+  std::filesystem::remove(path.string() + ".metadata.json", error);
+  std::filesystem::remove(path.string() + ".metadata.json.partial", error);
 }
 
 TEST(RecordCommand, SelectsCsvFromExtensionAndHonorsQuietMode) {

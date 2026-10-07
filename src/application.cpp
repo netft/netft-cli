@@ -4,12 +4,14 @@
 #include "cli/completion.hpp"
 #include "cli/help.hpp"
 #include "cli/parser.hpp"
+#include "cli/schema.hpp"
 #include "commands/bias.hpp"
 #include "commands/check.hpp"
 #include "commands/info.hpp"
 #include "commands/monitor.hpp"
 #include "commands/record.hpp"
 #include "config/resolver.hpp"
+#include "output/json.hpp"
 #include "platform/line_reader.hpp"
 #include "sensor/netft_backend.hpp"
 
@@ -93,7 +95,12 @@ Filesystem &NativeEnvironment::filesystem() { return implementation_->filesystem
 EnvironmentMap NativeEnvironment::environment() const { return read_process_environment(); }
 
 int NativeEnvironment::show_help(const ShowHelp &help) {
-  implementation_->output.standard_output << render_help(help.topic);
+  if (help.topic == "schema") {
+    write_command_schema(implementation_->output.standard_output, command_schema(),
+                         NETFT_CLI_VERSION, NETFT_CLI_SOURCE_COMMIT, NETFT_CLI_SOURCE_DIRTY);
+  } else {
+    implementation_->output.standard_output << render_help(help.topic);
+  }
   implementation_->output.standard_output.flush();
   if (!implementation_->output.standard_output) {
     throw AppError{ExitCode::Io, "failed to write help output"};

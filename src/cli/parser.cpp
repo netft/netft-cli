@@ -373,6 +373,11 @@ Action parse_arguments(const std::vector<std::string_view> &arguments) {
     }
     return ShowHelp{"general"};
   }
+  if (normalized.front() == "--schema") {
+    if (normalized.size() != 1)
+      usage_error("Schema does not take arguments");
+    return ShowHelp{"schema"};
+  }
   if (normalized.front() == "--version") {
     if (normalized.size() != 1) {
       usage_error("Version does not take arguments");

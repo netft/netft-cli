@@ -43,6 +43,9 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
   std::atomic<std::uint64_t> accepted_count{};
   std::uint64_t written_count{};
   std::exception_ptr writer_error;
+  RecorderResult summary;
+  std::optional<std::chrono::steady_clock::time_point> first_sample_at, last_sample_at;
+  std::optional<std::uint32_t> last_recorded_rdt;
   const auto monotonic_origin = clock_.now();
   const auto wall_origin = wall_clock_.now();
   const auto initial_data_deadline = deadline_after(monotonic_origin, connection_.timeout);
@@ -65,6 +68,19 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
                               item.sample->received_at - monotonic_origin);
         writer_.write(make_recording_record(*item.sample, monotonic_origin, timestamp));
         ++written_count;
+        if (!first_sample_at)
+          first_sample_at = item.sample->received_at;
+        last_sample_at = item.sample->received_at;
+        summary.configuration_revisions.insert(item.sample->configuration_revision);
+        summary.force_units.emplace(netft::to_string(item.sample->force_unit));
+        summary.torque_units.emplace(netft::to_string(item.sample->torque_unit));
+        if (last_recorded_rdt) {
+          const auto delta =
+              static_cast<std::uint32_t>(item.sample->rdt_sequence - *last_recorded_rdt);
+          if (delta > 0 && delta < 0x80000000U)
+            summary.recorded_rdt_gaps += delta - 1U;
+        }
+        last_recorded_rdt = item.sample->rdt_sequence;
       }
     } catch (...) {
       writer_error = std::current_exception();
@@ -145,6 +161,7 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
     }
 
     const auto final_health = acquisition.health();
+    summary.reconnect_count = final_health.reconnect_count;
     data_failed = data_failed || final_health.state == netft::ClientState::Faulted;
   } catch (...) {
     data_failed = true;
@@ -165,7 +182,14 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
                                         "terminal fault; partial output was retained"};
   }
   finalize();
-  return {written_count, interrupted};
+  summary.written_count = written_count;
+  summary.interrupted = interrupted;
+  summary.accepted_count = accepted_count.load(std::memory_order_acquire);
+  if (first_sample_at && last_sample_at) {
+    summary.sample_span_seconds =
+        std::max(0.0, std::chrono::duration<double>{*last_sample_at - *first_sample_at}.count());
+  }
+  return summary;
 }
 
 } // namespace netft_cli

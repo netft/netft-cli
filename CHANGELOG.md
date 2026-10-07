@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased recording metadata
+
+- Add a shared versioned recording summary beside completed captures.
+- CLI adds a typed `--schema` interface and sample calibration revisions; Viewer records pause and sequence-gap context.
+
 All notable changes to this project are documented in this file.
 
 ## Unreleased

@@ -19,7 +19,7 @@ namespace {
 constexpr std::string_view header =
     "schema_version,timestamp_utc,elapsed_seconds,rdt_sequence,ft_sequence,status,"
     "raw_fx,raw_fy,raw_fz,raw_tx,raw_ty,raw_tz,"
-    "fx,fy,fz,tx,ty,tz,force_unit,torque_unit\r\n";
+    "fx,fy,fz,tx,ty,tz,force_unit,torque_unit,configuration_revision\r\n";
 
 void require_finite(double value) {
   if (!std::isfinite(value)) {
@@ -80,6 +80,7 @@ std::string serialize(const RecordingRecord &record) {
   append_field(output, record.force_unit);
   output.push_back(',');
   append_field(output, record.torque_unit);
+  append_value(output, record.configuration_revision);
   output += "\r\n";
   return output;
 }

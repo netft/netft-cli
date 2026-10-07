@@ -57,6 +57,7 @@ std::string serialize(const RecordingRecord &record) {
   append_number(output, record.rdt_sequence);
   output += ",\"ft_sequence\":";
   append_number(output, record.ft_sequence);
+  output += ",\"configuration_revision\":" + std::to_string(record.configuration_revision);
   output += ",\"status\":";
   append_number(output, record.status);
   output += ",\"raw\":";

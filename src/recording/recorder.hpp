@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
+#include <string>
 
 namespace netft_cli {
 
@@ -22,6 +24,12 @@ struct RecorderLimits {
 struct RecorderResult {
   std::uint64_t written_count{};
   bool interrupted{};
+  std::uint64_t accepted_count{};
+  double sample_span_seconds{};
+  std::set<std::uint64_t> configuration_revisions;
+  std::set<std::string> force_units, torque_units;
+  std::uint64_t recorded_rdt_gaps{};
+  std::uint64_t reconnect_count{};
 };
 
 class Recorder {
