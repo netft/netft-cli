@@ -131,6 +131,8 @@ def apply_adaptation(destination: Path, patch: Path) -> None:
         subprocess.run(
             [
                 "git",
+                "-c",
+                "core.autocrlf=false",
                 "apply",
                 "--unidiff-zero",
                 f"--directory={patch_directory.as_posix()}",

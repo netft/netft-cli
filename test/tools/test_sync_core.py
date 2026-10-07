@@ -50,6 +50,8 @@ def make_exact_base_fixture(path: Path) -> Path:
     run("git", "init", cwd=path)
     run(
         "git",
+        "-c",
+        "core.autocrlf=false",
         "apply",
         "--reverse",
         "--unidiff-zero",
