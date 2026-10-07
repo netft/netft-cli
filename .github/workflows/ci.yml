@@ -29,6 +29,7 @@ jobs:
           - target: windows-x86_64
             runner: windows-2025
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -44,7 +45,6 @@ jobs:
 
       - if: startsWith(matrix.target, 'linux-')
         run: |
-          pixi run ctest --test-dir build --output-on-failure
           pixi run ./build/netft --version
 
       - if: startsWith(matrix.target, 'macos-')

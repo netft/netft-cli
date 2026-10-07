@@ -344,7 +344,7 @@ void write_serialized(std::ostream &stream, const Record &record, bool newline) 
 
 void write_recording_metadata(std::ostream &stream, const RecorderResult &result) {
   std::string output{
-      "{\"schema_version\":1,\"kind\":\"netft-recording\",\"producer\":\"netft-cli\",\"result\":"};
+      R"({"schema_version":1,"kind":"netft-recording","producer":"netft-cli","result":)"};
   append_string(output, result.interrupted ? "interrupted" : "complete");
   output += ",\"accepted_samples\":";
   append_integer(output, result.accepted_count);
@@ -356,34 +356,38 @@ void write_recording_metadata(std::ostream &stream, const RecorderResult &result
   append_integer(output, result.recorded_rdt_gaps);
   output += ",\"reconnect_count\":";
   append_integer(output, result.reconnect_count);
-  output += ",\"error\":null,\"pause_count\":0,\"configuration_revisions\":[";
+  output += R"(,"error":null,"pause_count":0,"configuration_revisions":[)";
   bool first = true;
   for (const auto revision : result.configuration_revisions) {
-    if (!first)
+    if (!first) {
       output.push_back(',');
+    }
     first = false;
     append_integer(output, revision);
   }
   output += "],\"force_units\":[";
   first = true;
   for (const auto &unit : result.force_units) {
-    if (!first)
+    if (!first) {
       output.push_back(',');
+    }
     first = false;
     append_string(output, unit);
   }
   output += "],\"torque_units\":[";
   first = true;
   for (const auto &unit : result.torque_units) {
-    if (!first)
+    if (!first) {
       output.push_back(',');
+    }
     first = false;
     append_string(output, unit);
   }
   output += "]}\n";
   stream.write(output.data(), static_cast<std::streamsize>(output.size()));
-  if (!stream)
+  if (!stream) {
     throw AppError{ExitCode::Io, "failed to write recording metadata"};
+  }
 }
 
 void write_command_schema(std::ostream &stream, const CommandSchema &schema,
@@ -399,7 +403,7 @@ void write_command_schema(std::ostream &stream, const CommandSchema &schema,
                                                    "duration",
                                                    "path",
                                                    "choice"};
-  std::string output{"{\"schemaVersion\":1,\"kind\":\"cli\",\"component\":\"netft-cli\""};
+  std::string output{R"({"schemaVersion":1,"kind":"cli","component":"netft-cli")"};
   auto string_field = [&](std::string_view key, std::string_view value) {
     output.push_back(',');
     append_string(output, key);
@@ -410,8 +414,9 @@ void write_command_schema(std::ostream &stream, const CommandSchema &schema,
     output.push_back('[');
     bool first = true;
     for (const auto &value : values) {
-      if (!first)
+      if (!first) {
         output.push_back(',');
+      }
       first = false;
       append(value);
     }
@@ -425,8 +430,9 @@ void write_command_schema(std::ostream &stream, const CommandSchema &schema,
     output += "{\"id\":";
     append_string(output, option.long_name);
     string_field("longName", option.long_name);
-    if (option.short_name)
+    if (option.short_name) {
       string_field("shortName", std::string(1, option.short_name));
+    }
     string_field("valueType", types.at(static_cast<std::size_t>(option.value_type)));
     string_field("description", option.description);
     output += option.repeatable ? ",\"repeatable\":true" : ",\"repeatable\":false";
@@ -468,22 +474,36 @@ void write_command_schema(std::ostream &stream, const CommandSchema &schema,
   array(exits, [&](int code) {
     output += "{\"code\":";
     append_integer(output, code);
-    const std::string_view meaning = code == 0   ? "Completed successfully"
-                                     : code == 2 ? "Invalid command line or configuration"
-                                     : code == 3 ? "Sensor discovery failed"
-                                     : code == 4 ? "Stream connection or acquisition failed"
-                                     : code == 5 ? "Sensor reported a fault"
-                                     : code == 6 ? "Input/output operation failed"
-                                     : code == 7 ? "A check acceptance criterion failed"
-                                     : code == 8 ? "Recording integrity could not be guaranteed"
-                                                 : "Interrupted";
+    const auto meaning = [](int exit_code) -> std::string_view {
+      switch (exit_code) {
+      case 0:
+        return "Completed successfully";
+      case 2:
+        return "Invalid command line or configuration";
+      case 3:
+        return "Sensor discovery failed";
+      case 4:
+        return "Stream connection or acquisition failed";
+      case 5:
+        return "Sensor reported a fault";
+      case 6:
+        return "Input/output operation failed";
+      case 7:
+        return "A check acceptance criterion failed";
+      case 8:
+        return "Recording integrity could not be guaranteed";
+      default:
+        return "Interrupted";
+      }
+    }(code);
     string_field("meaning", meaning);
     output.push_back('}');
   });
   output += "}\n";
   stream.write(output.data(), static_cast<std::streamsize>(output.size()));
-  if (!stream)
+  if (!stream) {
     throw AppError{ExitCode::Io, "failed to write interface schema"};
+  }
 }
 
 void write_json(std::ostream &stream, const ConfigurationRecord &record) {

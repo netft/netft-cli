@@ -32,14 +32,15 @@ public:
 #else
     const auto descriptor = ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
 #endif
-    if (descriptor < 0)
+    if (descriptor < 0) {
       throw std::system_error(errno, std::generic_category(), "create recording");
+    }
 #ifdef _WIN32
     file_ = _wfdopen(descriptor, L"wb");
 #else
     file_ = ::fdopen(descriptor, "wb");
 #endif
-    if (!file_) {
+    if (file_ == nullptr) {
       const auto error = errno;
 #ifdef _WIN32
       _close(descriptor);
@@ -52,8 +53,9 @@ public:
   }
   ~FileBuffer() override { static_cast<void>(close()); }
   bool close() noexcept {
-    if (!file_)
+    if (file_ == nullptr) {
       return true;
+    }
     const bool flushed = sync() == 0;
     const bool closed = std::fclose(file_) == 0;
     file_ = nullptr;
@@ -63,17 +65,20 @@ public:
 
 protected:
   int sync() override {
-    if (!file_)
+    if (file_ == nullptr) {
       return -1;
+    }
     const auto count = static_cast<std::size_t>(pptr() - pbase());
-    if (count != 0 && std::fwrite(pbase(), 1, count, file_) != count)
+    if (count != 0 && std::fwrite(pbase(), 1, count, file_) != count) {
       return -1;
+    }
     setp(buffer_.data(), buffer_.data() + buffer_.size());
     return std::fflush(file_);
   }
   int_type overflow(int_type value) override {
-    if (sync() != 0)
+    if (sync() != 0) {
       return traits_type::eof();
+    }
     if (!traits_type::eq_int_type(value, traits_type::eof())) {
       *pptr() = traits_type::to_char_type(value);
       pbump(1);
@@ -82,9 +87,10 @@ protected:
   }
   std::streamsize xsputn(const char *source, std::streamsize count) override {
     std::streamsize written{};
-    while (written < count && file_) {
-      if (pptr() == epptr() && sync() != 0)
+    while (written < count && (file_ != nullptr)) {
+      if (pptr() == epptr() && sync() != 0) {
         break;
+      }
       const auto chunk = std::min(count - written, static_cast<std::streamsize>(epptr() - pptr()));
       std::memcpy(pptr(), source + written, static_cast<std::size_t>(chunk));
       pbump(static_cast<int>(chunk));
@@ -112,8 +118,9 @@ std::ostream &ExclusiveOutputFile::stream() noexcept { return impl_->stream; }
 void ExclusiveOutputFile::close() {
   impl_->stream.flush();
   const bool closed = impl_->buffer.close();
-  if (!impl_->stream || !closed)
+  if (!impl_->stream || !closed) {
     throw std::ios_base::failure("recording close failed");
+  }
 }
 
 bool NativeFilesystem::exists(const std::filesystem::path &path) const {

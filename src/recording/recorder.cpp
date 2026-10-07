@@ -28,6 +28,9 @@ Clock::TimePoint deadline_after(Clock::TimePoint origin, std::chrono::duration<d
   }
   return origin + converted;
 }
+Clock::TimePoint deadline_at_or_max(Clock::TimePoint origin, Clock::Duration interval) {
+  return origin > Clock::TimePoint::max() - interval ? Clock::TimePoint::max() : origin + interval;
+}
 } // namespace
 
 Recorder::Recorder(SensorBackend &backend, ConnectionOptions connection, RecordingWriter &writer,
@@ -44,15 +47,17 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
   std::uint64_t written_count{};
   std::exception_ptr writer_error;
   RecorderResult summary;
-  std::optional<std::chrono::steady_clock::time_point> first_sample_at, last_sample_at;
+  std::optional<std::chrono::steady_clock::time_point> first_sample_at;
+  std::optional<std::chrono::steady_clock::time_point> last_sample_at;
   std::optional<std::uint32_t> last_recorded_rdt;
   const auto monotonic_origin = clock_.now();
   const auto wall_origin = wall_clock_.now();
   const auto initial_data_deadline = deadline_after(monotonic_origin, connection_.timeout);
   const auto idle_interval = initial_data_deadline - monotonic_origin;
   std::optional<Clock::TimePoint> deadline;
-  if (limits.duration)
+  if (limits.duration) {
     deadline = deadline_after(monotonic_origin, *limits.duration);
+  }
 
   auto acquisition = Acquisition::open(backend_, connection_);
 
@@ -68,8 +73,9 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
                               item.sample->received_at - monotonic_origin);
         writer_.write(make_recording_record(*item.sample, monotonic_origin, timestamp));
         ++written_count;
-        if (!first_sample_at)
+        if (!first_sample_at) {
           first_sample_at = item.sample->received_at;
+        }
         last_sample_at = item.sample->received_at;
         summary.configuration_revisions.insert(item.sample->configuration_revision);
         summary.force_units.emplace(netft::to_string(item.sample->force_unit));
@@ -77,8 +83,9 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
         if (last_recorded_rdt) {
           const auto delta =
               static_cast<std::uint32_t>(item.sample->rdt_sequence - *last_recorded_rdt);
-          if (delta > 0 && delta < 0x80000000U)
+          if (delta > 0 && delta < 0x80000000U) {
             summary.recorded_rdt_gaps += delta - 1U;
+          }
         }
         last_recorded_rdt = item.sample->rdt_sequence;
       }
@@ -139,8 +146,7 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
       const auto count = accepted_count.load(std::memory_order_acquire);
       if (count != last_progress_count) {
         last_progress_count = count;
-        data_deadline = now > Clock::TimePoint::max() - idle_interval ? Clock::TimePoint::max()
-                                                                      : now + idle_interval;
+        data_deadline = deadline_at_or_max(now, idle_interval);
       }
       if (now >= data_deadline) {
         data_failed = true;
@@ -150,8 +156,7 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
         break;
       }
       const auto interval = std::chrono::duration_cast<Clock::Duration>(poll_interval);
-      const auto next_poll =
-          now > Clock::TimePoint::max() - interval ? Clock::TimePoint::max() : now + interval;
+      const auto next_poll = deadline_at_or_max(now, interval);
       const auto next =
           std::min(data_deadline, deadline ? std::min(*deadline, next_poll) : next_poll);
       if (!clock_.wait_until(next, interrupt_)) {
