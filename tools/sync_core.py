@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Sequence
 
 REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
-REQUIRED_TAG = "v0.3.3"
-REQUIRED_COMMIT = "3259b8576b16fb150b51e9ef9090366c5e6efcba"
+REQUIRED_TAG = "unreleased"
+REQUIRED_COMMIT = "8aec517a8d4baed66089e0e9d0928c90f8ebfadb"
 SELECTED = ("LICENSE", "include", "src")
 ADAPTATION_NAME = "ADAPTATIONS.patch"
 ADAPTATION_FORMAT = "git-diff-unified-zero"
-REQUIRED_ADAPTATION_SHA256 = "07c596386c68ccd799056247d28871b41348aa56565a9504e07945cf3d7bfade"
+REQUIRED_ADAPTATION_SHA256 = "59392d47b672efde285f4fa9b1396e3c68de164442c3bd83a290f30af96d99b9"
 
 
 def canonical_adaptation() -> Path:
@@ -195,7 +195,10 @@ def sync(source: Path, destination: Path, tag: str) -> None:
         raise SystemExit("unsupported upstream tag")
     if git(source, "remote", "get-url", "origin") != REQUIRED_REPOSITORY:
         raise SystemExit("source repository does not match the required repository")
-    commit = git(source, "rev-parse", f"{tag}^{{commit}}")
+    try:
+        commit = git(source, "rev-parse", f"{REQUIRED_COMMIT if tag == 'unreleased' else tag}^{{commit}}")
+    except SystemExit as error:
+        raise SystemExit("source tag does not match the required commit") from error
     if commit != REQUIRED_COMMIT:
         raise SystemExit("source tag does not match the required commit")
     if git(source, "rev-parse", "HEAD") != commit:
@@ -222,7 +225,9 @@ def parse_arguments() -> argparse.Namespace:
 
     sync_parser = subcommands.add_parser("sync", help="copy a tagged upstream snapshot")
     sync_parser.add_argument("--source", type=Path, required=True)
-    sync_parser.add_argument("--tag", required=True)
+    identity = sync_parser.add_mutually_exclusive_group(required=True)
+    identity.add_argument("--tag")
+    identity.add_argument("--commit", help="exact pinned unpublished candidate commit")
     sync_parser.add_argument("--destination", type=Path, default=Path("core"))
 
     verify_parser = subcommands.add_parser("verify", help="verify the local snapshot manifest")
@@ -233,7 +238,9 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> None:
     arguments = parse_arguments()
     if arguments.command == "sync":
-        sync(arguments.source, arguments.destination, arguments.tag)
+        if arguments.commit is not None and arguments.commit != REQUIRED_COMMIT:
+            raise SystemExit("unsupported upstream commit")
+        sync(arguments.source, arguments.destination, arguments.tag or "unreleased")
     else:
         verify(arguments.destination)
 

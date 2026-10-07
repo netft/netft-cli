@@ -1,7 +1,7 @@
 repository=https://github.com/netft/netft-cpp.git
-tag=v0.3.3
-commit=3259b8576b16fb150b51e9ef9090366c5e6efcba
+tag=unreleased
+commit=8aec517a8d4baed66089e0e9d0928c90f8ebfadb
 paths=LICENSE,include,src
 adaptation_path=ADAPTATIONS.patch
 adaptation_format=git-diff-unified-zero
-adaptation_sha256=07c596386c68ccd799056247d28871b41348aa56565a9504e07945cf3d7bfade
+adaptation_sha256=59392d47b672efde285f4fa9b1396e3c68de164442c3bd83a290f30af96d99b9
