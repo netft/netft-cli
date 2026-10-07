@@ -88,3 +88,7 @@ through [SECURITY.md](SECURITY.md).
 
 This project is licensed under the [Apache License 2.0](LICENSE). Release
 archives include the notices for the synchronized `netft-cpp` core and libcurl.
+
+### Recording integrity (unreleased candidate)
+
+`record` never replaces existing destination or partial paths, including dangling links. The first sample and subsequent accepted samples must arrive within `--timeout`. A zero-sample session, terminal fault, queue overflow, writer failure or data timeout returns recording error 8 and retains `.partial`; inspect partial data before using it. Recoverable interruptions can resume within the timeout. `--count` can wait for the selected sample count while data keeps arriving; combine it with `--duration` for a total time limit. Ctrl-C drains nonempty recordings, finalizes them and returns 130. Publication protects file names but does not promise power-loss durability.

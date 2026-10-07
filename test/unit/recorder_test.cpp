@@ -164,5 +164,46 @@ TEST(Recorder, QueueOverflowIsExplicitAndRetainsUnfinalizedData) {
   EXPECT_EQ(backend.session().stop_calls(), 1U);
 }
 
+TEST(Recorder, NoFirstSampleFailsCountModeWithinConnectionTimeout) {
+  test::FakeBackend backend;
+  CollectingWriter writer;
+  test::FakeClock clock;
+  FixedWallClock wall_clock;
+  InterruptFlag interrupt;
+  Recorder recorder(backend, test::connection_options(), writer, clock, wall_clock, interrupt);
+  bool finalized{};
+  // An independent interrupt keeps the regression bounded on the old code.
+  clock.set_sleep_hook([&](std::size_t n) {
+    if (n == 200)
+      interrupt.request();
+  });
+  test::expect_app_error(ExitCode::Recording, [&] {
+    static_cast<void>(recorder.run({std::nullopt, 1, 8}, [&] { finalized = true; }));
+  });
+  EXPECT_FALSE(finalized);
+  EXPECT_LE(clock.now().time_since_epoch(), 2s);
+  EXPECT_EQ(backend.session().stop_calls(), 1U);
+}
+
+TEST(Recorder, TerminalFaultRetainsPartialEvenAfterReceivingSamples) {
+  test::FakeBackend backend;
+  backend.session().set_samples({test::sample(10)});
+  netft::HealthSnapshot health;
+  health.state = netft::ClientState::Faulted;
+  health.fault_code = netft::FaultCode::SeriousStatus;
+  backend.session().set_health(health);
+  CollectingWriter writer;
+  test::FakeClock clock;
+  FixedWallClock wall_clock;
+  InterruptFlag interrupt;
+  Recorder recorder(backend, test::connection_options(), writer, clock, wall_clock, interrupt);
+  bool finalized{};
+  test::expect_app_error(ExitCode::Recording, [&] {
+    static_cast<void>(recorder.run({1s, std::nullopt, 8}, [&] { finalized = true; }));
+  });
+  EXPECT_FALSE(finalized);
+  EXPECT_EQ(writer.records.size(), 1U);
+}
+
 } // namespace
 } // namespace netft_cli

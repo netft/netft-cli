@@ -24,6 +24,15 @@ public:
   }
 };
 
+class BlindFilesystem final : public Filesystem {
+public:
+  bool exists(const std::filesystem::path &) const override { return false; }
+  void rename(const std::filesystem::path &source,
+              const std::filesystem::path &destination) override {
+    NativeFilesystem{}.rename(source, destination);
+  }
+};
+
 std::filesystem::path output_path(std::string_view name) {
   const auto directory = std::filesystem::path(testing::TempDir()) / "netft-output-file";
   std::filesystem::create_directories(directory);
@@ -94,6 +103,52 @@ TEST(OutputFile, RetainsPartialFileWhenStreamOrRenameFails) {
   EXPECT_FALSE(std::filesystem::exists(rename_path));
   remove_output(rename_path);
 }
+
+TEST(OutputFile, ExclusiveCreatePreservesPartialEvenWhenPrecheckMissesIt) {
+  const auto path = output_path("exclusive-create.csv");
+  remove_output(path);
+  const auto partial = path.string() + ".partial";
+  std::ofstream(partial) << "other writer";
+  BlindFilesystem filesystem;
+  test::expect_app_error(ExitCode::Io, [&] { OutputFile output(path, filesystem); });
+  std::ifstream input(partial);
+  const std::string content{std::istreambuf_iterator<char>{input},
+                            std::istreambuf_iterator<char>{}};
+  EXPECT_EQ(content, "other writer");
+  remove_output(path);
+}
+
+#ifndef _WIN32
+TEST(OutputFile, RejectsDanglingPartialWithoutCreatingItsTarget) {
+  const auto path = output_path("dangling-partial.csv");
+  const auto target = output_path("must-not-create.csv");
+  remove_output(path);
+  remove_output(target);
+  std::filesystem::create_symlink(target, path.string() + ".partial");
+  NativeFilesystem filesystem;
+  test::expect_app_error(ExitCode::Io, [&] { OutputFile output(path, filesystem); });
+  EXPECT_FALSE(std::filesystem::exists(target));
+  remove_output(path);
+  remove_output(target);
+}
+
+TEST(OutputFile, PreservesDanglingDestinationAppearingBeforeFinalize) {
+  const auto path = output_path("destination-race.csv");
+  const auto target = output_path("destination-link-target.csv");
+  remove_output(path);
+  remove_output(target);
+  NativeFilesystem filesystem;
+  {
+    OutputFile output(path, filesystem);
+    output.stream() << "captured";
+    std::filesystem::create_symlink(target, path);
+    test::expect_app_error(ExitCode::Io, [&] { output.finalize(); });
+    EXPECT_TRUE(std::filesystem::is_symlink(path));
+    EXPECT_TRUE(std::filesystem::exists(output.partial_path()));
+  }
+  remove_output(path);
+}
+#endif
 
 } // namespace
 } // namespace netft_cli

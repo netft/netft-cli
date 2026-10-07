@@ -7,11 +7,28 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <exception>
+#include <limits>
 #include <thread>
 #include <utility>
 
 namespace netft_cli {
+namespace {
+Clock::TimePoint deadline_after(Clock::TimePoint origin, std::chrono::duration<double> duration) {
+  const auto ticks = static_cast<long double>(duration.count()) * Clock::Duration::period::den /
+                     Clock::Duration::period::num;
+  if (!std::isfinite(ticks) || ticks < 1 ||
+      ticks > static_cast<long double>(Clock::Duration::max().count())) {
+    throw AppError{ExitCode::Usage, "duration is outside the supported clock range"};
+  }
+  const auto converted = std::chrono::duration_cast<Clock::Duration>(duration);
+  if (origin > Clock::TimePoint::max() - converted) {
+    throw AppError{ExitCode::Usage, "duration is outside the supported clock range"};
+  }
+  return origin + converted;
+}
+} // namespace
 
 Recorder::Recorder(SensorBackend &backend, ConnectionOptions connection, RecordingWriter &writer,
                    Clock &clock, WallClock &wall_clock, InterruptFlag &interrupt)
@@ -28,6 +45,12 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
   std::exception_ptr writer_error;
   const auto monotonic_origin = clock_.now();
   const auto wall_origin = wall_clock_.now();
+  const auto initial_data_deadline = deadline_after(monotonic_origin, connection_.timeout);
+  const auto idle_interval = initial_data_deadline - monotonic_origin;
+  std::optional<Clock::TimePoint> deadline;
+  if (limits.duration)
+    deadline = deadline_after(monotonic_origin, *limits.duration);
+
   auto acquisition = Acquisition::open(backend_, connection_);
 
   std::thread writer_thread([&] {
@@ -80,39 +103,52 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
     throw;
   }
 
-  std::optional<Clock::TimePoint> deadline;
-  if (limits.duration) {
-    const auto ticks = std::chrono::duration_cast<Clock::Duration>(*limits.duration);
-    if (ticks <= Clock::Duration::zero() || monotonic_origin > Clock::TimePoint::max() - ticks) {
-      acquisition.stop();
-      queue.cancel();
-      writer_thread.join();
-      throw AppError{ExitCode::Usage, "duration is outside the supported clock range"};
-    }
-    deadline = monotonic_origin + ticks;
-  }
-
   bool interrupted{};
+  bool data_failed{};
+  std::uint64_t last_progress_count{};
+  auto data_deadline = initial_data_deadline;
   constexpr auto poll_interval = std::chrono::milliseconds{10};
-  while (!stop_requested.load(std::memory_order_acquire)) {
-    if (interrupt_.requested()) {
-      interrupted = true;
-      break;
+  try {
+    while (!stop_requested.load(std::memory_order_acquire)) {
+      if (interrupt_.requested()) {
+        interrupted = true;
+        break;
+      }
+      const auto now = clock_.now();
+      const auto health = acquisition.health();
+      if (health.state == netft::ClientState::Faulted) {
+        data_failed = true;
+        break;
+      }
+      const auto count = accepted_count.load(std::memory_order_acquire);
+      if (count != last_progress_count) {
+        last_progress_count = count;
+        data_deadline = now > Clock::TimePoint::max() - idle_interval ? Clock::TimePoint::max()
+                                                                      : now + idle_interval;
+      }
+      if (now >= data_deadline) {
+        data_failed = true;
+        break;
+      }
+      if (deadline && now >= *deadline) {
+        break;
+      }
+      const auto interval = std::chrono::duration_cast<Clock::Duration>(poll_interval);
+      const auto next_poll =
+          now > Clock::TimePoint::max() - interval ? Clock::TimePoint::max() : now + interval;
+      const auto next =
+          std::min(data_deadline, deadline ? std::min(*deadline, next_poll) : next_poll);
+      if (!clock_.wait_until(next, interrupt_)) {
+        interrupted = true;
+        break;
+      }
     }
-    const auto now = clock_.now();
-    if (deadline && now >= *deadline) {
-      break;
-    }
-    const auto interval = std::chrono::duration_cast<Clock::Duration>(poll_interval);
-    const auto next_poll =
-        now > Clock::TimePoint::max() - interval ? Clock::TimePoint::max() : now + interval;
-    const auto next = deadline ? std::min(*deadline, next_poll) : next_poll;
-    if (!clock_.wait_until(next, interrupt_)) {
-      interrupted = true;
-      break;
-    }
-  }
 
+    const auto final_health = acquisition.health();
+    data_failed = data_failed || final_health.state == netft::ClientState::Faulted;
+  } catch (...) {
+    data_failed = true;
+  }
   acquisition.stop();
   queue.close();
   writer_thread.join();
@@ -123,6 +159,10 @@ RecorderResult Recorder::run(const RecorderLimits &limits, const std::function<v
   }
   if (overflow.load(std::memory_order_acquire)) {
     throw AppError{ExitCode::Recording, "recording queue overflowed; partial output was retained"};
+  }
+  if (data_failed || written_count == 0) {
+    throw AppError{ExitCode::Recording, "recording received no data within timeout or reached a "
+                                        "terminal fault; partial output was retained"};
   }
   finalize();
   return {written_count, interrupted};

@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Reject calibration scales that can overflow measurements; integrate the pinned unpublished SDK candidate.
+- Create recording partial files exclusively and publish without replacing an existing destination or link.
+- Fail recordings with exit 8 on zero samples, terminal client faults, or no accepted samples within `--timeout`; retain `.partial`. Recoveries must resume data within that timeout. Ctrl-C with accepted data still drains and finalizes, returning 130.
+
+## Unreleased
+
 ## 0.2.1 - 2026-08-14
 
 ### Fixed
