@@ -68,12 +68,12 @@ Never commit a laboratory sensor address, credentials, recordings, or private ne
 
 ## Core synchronization
 
-The private core snapshot comes from [netft-cpp](https://github.com/netft/netft-cpp). The current synchronization command accepts the unpublished `netft-cpp` candidate commit `8aec517a8d4baed66089e0e9d0928c90f8ebfadb`; it applies the checksum-pinned `core/ADAPTATIONS.patch` to reproduce the existing adapted snapshot.
+The private core snapshot comes from [netft-cpp](https://github.com/netft/netft-cpp). The current synchronization command accepts the unpublished `netft-cpp` candidate commit `91f012c5d6f9b63902765ccbec3437cb286c15e1`; it applies the checksum-pinned `core/ADAPTATIONS.patch` to reproduce the existing adapted snapshot.
 
 To reproduce the current snapshot from a clean checkout at that exact tag:
 
 ```bash
-python tools/sync_core.py sync --source <path-to-netft-cpp> --commit 8aec517a8d4baed66089e0e9d0928c90f8ebfadb
+python tools/sync_core.py sync --source <path-to-netft-cpp> --commit 91f012c5d6f9b63902765ccbec3437cb286c15e1
 python tools/sync_core.py verify
 ```
 

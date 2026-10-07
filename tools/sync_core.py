@@ -11,11 +11,11 @@ from typing import Sequence
 
 REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
 REQUIRED_TAG = "unreleased"
-REQUIRED_COMMIT = "8aec517a8d4baed66089e0e9d0928c90f8ebfadb"
+REQUIRED_COMMIT = "91f012c5d6f9b63902765ccbec3437cb286c15e1"
 SELECTED = ("LICENSE", "include", "src")
 ADAPTATION_NAME = "ADAPTATIONS.patch"
 ADAPTATION_FORMAT = "git-diff-unified-zero"
-REQUIRED_ADAPTATION_SHA256 = "59392d47b672efde285f4fa9b1396e3c68de164442c3bd83a290f30af96d99b9"
+REQUIRED_ADAPTATION_SHA256 = "4b2030500ea052b8958f3713e04079c8571cf44d8027e3e73f3b52b1e031cf44"
 
 
 def canonical_adaptation() -> Path:
