@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Sequence
 
 REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
-REQUIRED_TAG = "unreleased"
-REQUIRED_COMMIT = "91f012c5d6f9b63902765ccbec3437cb286c15e1"
+REQUIRED_TAG = "v0.3.4"
+REQUIRED_COMMIT = "1ce68a08a9387d9a36d22c3c259e44533199c347"
 SELECTED = ("LICENSE", "include", "src")
 ADAPTATION_NAME = "ADAPTATIONS.patch"
 ADAPTATION_FORMAT = "git-diff-unified-zero"
@@ -229,7 +229,7 @@ def parse_arguments() -> argparse.Namespace:
     sync_parser.add_argument("--source", type=Path, required=True)
     identity = sync_parser.add_mutually_exclusive_group(required=True)
     identity.add_argument("--tag")
-    identity.add_argument("--commit", help="exact pinned unpublished candidate commit")
+    identity.add_argument("--commit", help="exact pinned upstream commit")
     sync_parser.add_argument("--destination", type=Path, default=Path("core"))
 
     verify_parser = subcommands.add_parser("verify", help="verify the local snapshot manifest")
@@ -242,7 +242,7 @@ def main() -> None:
     if arguments.command == "sync":
         if arguments.commit is not None and arguments.commit != REQUIRED_COMMIT:
             raise SystemExit("unsupported upstream commit")
-        sync(arguments.source, arguments.destination, arguments.tag or "unreleased")
+        sync(arguments.source, arguments.destination, arguments.tag or REQUIRED_TAG)
     else:
         verify(arguments.destination)
 

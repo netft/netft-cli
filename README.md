@@ -89,11 +89,11 @@ through [SECURITY.md](SECURITY.md).
 This project is licensed under the [Apache License 2.0](LICENSE). Release
 archives include the notices for the synchronized `netft-cpp` core and libcurl.
 
-### Recording integrity (unreleased candidate)
+### Recording integrity (0.3.0)
 
 `record` never replaces existing destination or partial paths, including dangling links. The first sample and subsequent accepted samples must arrive within `--timeout`. A zero-sample session, terminal fault, queue overflow, writer failure or data timeout returns recording error 8 and retains `.partial`; inspect partial data before using it. Recoverable interruptions can resume within the timeout. `--count` can wait for the selected sample count while data keeps arriving; combine it with `--duration` for a total time limit. Ctrl-C drains nonempty recordings, finalizes them and returns 130. Publication protects file names but does not promise power-loss durability.
 
-## Recording metadata (unreleased candidate)
+## Recording metadata (0.3.0)
 
 After successful data finalization, the candidate writes `<output>.metadata.json` using schema version 1 and kind `netft-recording`. CLI and Viewer share these meanings:
 
@@ -113,6 +113,6 @@ Partial or failed captures do not receive a completed summary. Metadata creation
 
 The CLI candidate appends `configuration_revision` to CSV without moving existing columns and adds it inside the NDJSON sample object. Viewer already records revisions in each CSV row. Existing published releases retain their documented formats until these changes are released.
 
-## Machine interface (unreleased candidate)
+## Machine interface (0.3.0)
 
 `netft --schema` prints schema-version-1 JSON without opening a sensor connection. Commands refer to option identifiers, typed positionals and exit statuses from the same command definitions used by parsing and help. `version`, `sourceCommit` and `sourceDirty` identify the configured build. Archives with no Git metadata report unknown provenance; documentation generation requires a clean checkout and matching executable. Consumers must reject unsupported schema versions and should tolerate additive fields.

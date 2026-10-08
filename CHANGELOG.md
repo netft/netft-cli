@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-08
+
 ### Added
 
 - Provide a typed schema-version-1 `--schema` interface with configured source identity.
@@ -11,7 +13,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- Integrate the pinned unpublished SDK candidate's calibration and checked-time protections.
+- Integrate netft-cpp 0.3.4's calibration and checked-time protections.
 - Create recording partial files exclusively and publish without replacing an existing destination or link.
 - Fail recordings with exit 8 on zero samples, terminal client faults, or no accepted samples within `--timeout`; retain `.partial`. Recoveries must resume data within that timeout. Ctrl-C with accepted data still drains and finalizes, returning 130.
 - Derive release versions from project metadata and reject noncanonical stable version identifiers. Pin build actions to reviewed commits.
