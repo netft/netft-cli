@@ -1,21 +1,21 @@
 diff --git a/include/netft/types.hpp b/include/netft/types.hpp
-index feb6365..d26123c 100644
+index feb6365..7eb2cbb 100755
 --- a/include/netft/types.hpp
 +++ b/include/netft/types.hpp
 @@ -25,0 +26 @@ enum class RecoveryPolicy { Reconnect, FailStop };
 +enum class StartupMode { Stream, BiasAndStream };
-@@ -64,0 +66,2 @@ struct Config {
+@@ -65,0 +67,2 @@ struct Config {
 +  StartupMode startup_mode{StartupMode::Stream};
 +  bool retain_bound_socket_until_destruction{false};
 diff --git a/src/detail/client_impl.cpp b/src/detail/client_impl.cpp
-index 5ebc20c..63b03d4 100644
+index c8f7167..60d29d3 100755
 --- a/src/detail/client_impl.cpp
 +++ b/src/detail/client_impl.cpp
-@@ -450,0 +451,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
+@@ -455,0 +456,3 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
 +    if (config_.startup_mode == StartupMode::BiasAndStream) {
 +      transport_.send(detail::encode_request(detail::Command::SetSoftwareBias));
 +    }
-@@ -710 +713,3 @@ void Client::Impl::close_session() noexcept {
+@@ -720 +723,3 @@ void Client::Impl::close_session() noexcept {
 -  transport_.close();
 +  if (!config_.retain_bound_socket_until_destruction) {
 +    transport_.close();

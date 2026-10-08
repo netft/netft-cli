@@ -63,9 +63,9 @@ struct Config {
   double sample_rate_limit_hz{0.0};
   bool deliver_samples_with_error_status{false};
   RecoveryPolicy recovery_policy{RecoveryPolicy::Reconnect};
+  std::optional<Calibration> calibration_override;
   StartupMode startup_mode{StartupMode::Stream};
   bool retain_bound_socket_until_destruction{false};
-  std::optional<Calibration> calibration_override;
 };
 
 struct Sample {

@@ -52,6 +52,7 @@ RecordingRecord make_recording_record(const netft::Sample &sample,
        sample.torque[2]},
       std::string{netft::to_string(sample.force_unit)},
       std::string{netft::to_string(sample.torque_unit)},
+      sample.configuration_revision,
   };
 }
 

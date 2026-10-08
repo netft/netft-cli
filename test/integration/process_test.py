@@ -302,6 +302,12 @@ def test_record_finalizes_parseable_machine_files(tmp_path: Path, suffix: str) -
     assert not result.stdout
     assert not result.stderr
     assert destination.is_file()
+    metadata = json.loads(Path(f"{destination}.metadata.json").read_text())
+    assert metadata["kind"] == "netft-recording"
+    assert metadata["accepted_samples"] == metadata["written_samples"] == 5
+    assert metadata["configuration_revisions"] == [1]
+    assert metadata["force_units"] == ["N"]
+    assert metadata["pause_count"] == 0
     assert not Path(f"{destination}.partial").exists()
     if suffix == ".csv":
         with destination.open(newline="", encoding="utf-8") as stream:
@@ -346,3 +352,23 @@ def test_sigint_returns_130_and_stops_streaming() -> None:
     assert not stderr
     for line in stdout.splitlines():
         json.loads(line)
+
+
+def test_schema_exposes_typed_options_and_command_exit_contract_without_network() -> None:
+    result = run_process("--schema")
+    assert result.returncode == 0
+    assert not result.stderr
+    manifest = json.loads(result.stdout)
+    assert manifest["schemaVersion"] == 1
+    assert manifest["component"] == "netft-cli"
+    assert manifest["version"] == run_process("--version").stdout.strip().split()[-1]
+    options = {item["id"]: item for item in manifest["options"]}
+    commands = {item["id"]: item for item in manifest["commands"]}
+    assert options["timeout"]["valueType"] == "duration"
+    assert options["yes"]["valueType"] == "flag"
+    assert "yes" in commands["bias"]["optionIds"]
+    assert "yes" not in commands["record"]["optionIds"]
+    assert 8 in commands["record"]["exitStatuses"]
+    assert commands["completion"]["positionals"][0]["required"] is True
+    assert commands["completion"]["positionals"][0]["values"] == ["bash", "zsh", "fish", "powershell"]
+    assert run_process("--schema", "unexpected").returncode == 2

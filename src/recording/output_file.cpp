@@ -17,10 +17,7 @@ OutputFile::OutputFile(std::filesystem::path destination, Filesystem &filesystem
     if (filesystem_.exists(partial_)) {
       throw AppError{ExitCode::Io, "recording partial file already exists"};
     }
-    stream_.open(partial_, std::ios::binary | std::ios::out);
-    if (!stream_) {
-      throw AppError{ExitCode::Io, "recording partial file could not be opened"};
-    }
+    stream_ = std::make_unique<ExclusiveOutputFile>(partial_);
   } catch (const AppError &) {
     throw;
   } catch (const std::exception &) {
@@ -28,25 +25,14 @@ OutputFile::OutputFile(std::filesystem::path destination, Filesystem &filesystem
   }
 }
 
-OutputFile::~OutputFile() {
-  if (stream_.is_open()) {
-    stream_.close();
-  }
-}
+OutputFile::~OutputFile() = default;
 
 void OutputFile::finalize() {
   if (finalized_) {
     return;
   }
-  stream_.flush();
-  if (!stream_) {
-    throw AppError{ExitCode::Io, "recording output could not be flushed"};
-  }
-  stream_.close();
-  if (stream_.fail()) {
-    throw AppError{ExitCode::Io, "recording output could not be closed"};
-  }
   try {
+    stream_->close();
     filesystem_.rename(partial_, destination_);
   } catch (const std::exception &) {
     throw AppError{ExitCode::Io, "recording output could not be finalized"};

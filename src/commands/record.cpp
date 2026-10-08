@@ -1,6 +1,7 @@
 #include "commands/record.hpp"
 
 #include "app/error.hpp"
+#include "output/json.hpp"
 #include "recording/csv_writer.hpp"
 #include "recording/ndjson_writer.hpp"
 #include "recording/output_file.hpp"
@@ -70,6 +71,10 @@ int run_record(const RecordOptions &options, SensorBackend &backend, OutputConte
   Recorder recorder(backend, options.connection, *writer, clock, wall_clock, interrupt);
   const RecorderLimits limits{options.duration, options.count, queue_capacity};
   const auto result = recorder.run(limits, [&] { file.finalize(); });
+
+  OutputFile metadata(options.output.string() + ".metadata.json", filesystem);
+  write_recording_metadata(metadata.stream(), result);
+  metadata.finalize();
 
   write_progress(output, options.terminal,
                  "Recording saved: " + std::to_string(result.written_count) + " samples");

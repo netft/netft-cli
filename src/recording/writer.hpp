@@ -19,6 +19,7 @@ struct RecordingRecord {
   std::array<double, 6> scaled{};
   std::string force_unit;
   std::string torque_unit;
+  std::uint64_t configuration_revision{};
 };
 
 [[nodiscard]] RecordingRecord make_recording_record(const netft::Sample &sample,

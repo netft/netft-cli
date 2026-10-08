@@ -66,7 +66,8 @@ std::string general_help() {
             "  -q, --quiet         Suppress progress output.\n"
             "      --color MODE    Control color in human-readable output.\n"
             "      --help          Show help.\n"
-            "      --version       Show version.\n";
+            "      --version       Show version.\n"
+            "      --schema        Emit the versioned machine interface as JSON.\n";
   return stream.str();
 }
 

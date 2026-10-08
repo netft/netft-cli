@@ -4,7 +4,7 @@ if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
 
-project(netft_cli VERSION 0.2.1 LANGUAGES CXX)
+project(netft_cli VERSION 0.3.0 LANGUAGES CXX)
 
 if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY
@@ -142,12 +142,36 @@ target_link_libraries(netft_cli_commands PUBLIC
 netft_enable_warnings(netft_cli_commands)
 netft_enable_sanitizers(netft_cli_commands)
 
+# Bind machine interface provenance to the configured checkout. Archives without
+# Git remain buildable but advertise unknown provenance and cannot regenerate docs.
+set(NETFT_CLI_SOURCE_COMMIT "unknown")
+set(NETFT_CLI_SOURCE_DIRTY 1)
+find_package(Git QUIET)
+if(Git_FOUND)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE _identity_result OUTPUT_VARIABLE _identity OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE _status_result OUTPUT_VARIABLE _status OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(_identity_result EQUAL 0 AND _status_result EQUAL 0 AND _identity MATCHES "^[0-9a-f]+$")
+    set(NETFT_CLI_SOURCE_COMMIT "${_identity}")
+    if(_status STREQUAL "")
+      set(NETFT_CLI_SOURCE_DIRTY 0)
+    endif()
+  endif()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD" "${CMAKE_CURRENT_SOURCE_DIR}/.git/index")
+endif()
+
 add_library(netft_cli_application src/application.cpp)
 target_compile_features(netft_cli_application PUBLIC cxx_std_17)
 target_include_directories(netft_cli_application PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(netft_cli_application PUBLIC netft_cli_commands)
 target_compile_definitions(netft_cli_application PRIVATE
   NETFT_CLI_VERSION="${PROJECT_VERSION}"
+  NETFT_CLI_SOURCE_COMMIT="${NETFT_CLI_SOURCE_COMMIT}"
+  NETFT_CLI_SOURCE_DIRTY=${NETFT_CLI_SOURCE_DIRTY}
 )
 netft_enable_warnings(netft_cli_application)
 netft_enable_sanitizers(netft_cli_application)

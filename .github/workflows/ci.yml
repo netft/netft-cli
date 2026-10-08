@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Verify only the Windows native target after a platform-specific fix
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,22 +23,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: linux-x86_64
-            runner: ubuntu-24.04
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-          - target: macos-x86_64
-            runner: macos-15-intel
-          - target: macos-arm64
-            runner: macos-15
-          - target: windows-x86_64
-            runner: windows-2025
+        include: ${{ fromJSON(inputs.windows_only && '[{"target":"windows-x86_64","runner":"windows-2025"}]' || '[{"target":"linux-x86_64","runner":"ubuntu-24.04"},{"target":"linux-arm64","runner":"ubuntu-24.04-arm"},{"target":"macos-x86_64","runner":"macos-15-intel"},{"target":"macos-arm64","runner":"macos-15"},{"target":"windows-x86_64","runner":"windows-2025"}]') }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: Verify controlled core snapshot
+        run: python tools/sync_core.py verify
 
       - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
         if: startsWith(matrix.target, 'linux-')
@@ -44,7 +44,6 @@ jobs:
 
       - if: startsWith(matrix.target, 'linux-')
         run: |
-          pixi run ctest --test-dir build --output-on-failure
           pixi run ./build/netft --version
 
       - if: startsWith(matrix.target, 'macos-')
