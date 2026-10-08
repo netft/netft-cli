@@ -64,7 +64,7 @@ jobs:
             --output "${RUNNER_TEMP}/release-notes.md"
           echo "version=${version}" >>"${GITHUB_OUTPUT}"
 
-      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f
+      - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e
         with:
           cache: true
       - run: pixi run check
@@ -218,7 +218,7 @@ jobs:
         with:
           name: release-bundle
           path: release
-      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: release/dist/netft-cli-*
 
