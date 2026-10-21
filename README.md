@@ -95,7 +95,7 @@ archives include the notices for the synchronized `netft-cpp` core and libcurl.
 
 ## Recording metadata (0.3.0)
 
-After successful data finalization, the candidate writes `<output>.metadata.json` using schema version 1 and kind `netft-recording`. CLI and Viewer share these meanings:
+CLI 0.3.0 and later write `<output>.metadata.json` after successful data finalization, using schema version 1 and kind `netft-recording`. Viewer 0.2.1 and later use the same schema and these shared meanings:
 
 | Field | Meaning |
 | --- | --- |
@@ -111,7 +111,7 @@ After successful data finalization, the candidate writes `<output>.metadata.json
 
 Partial or failed captures do not receive a completed summary. Metadata creation and promotion follow the data file's overwrite policy. The two files are finalized separately: a metadata failure reports an error and preserves the completed data file, and may leave a metadata partial for recovery. Keep both files when archiving a successful capture.
 
-The CLI candidate appends `configuration_revision` to CSV without moving existing columns and adds it inside the NDJSON sample object. Viewer already records revisions in each CSV row. Existing published releases retain their documented formats until these changes are released.
+CLI 0.3.0 and later append `configuration_revision` to CSV without moving existing columns and add it inside the NDJSON sample object. Viewer records revisions in each CSV row. Older releases retain their documented formats.
 
 ## Machine interface (0.3.0)
 
