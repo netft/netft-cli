@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Sequence
 
 REQUIRED_REPOSITORY = "https://github.com/netft/netft-cpp.git"
-REQUIRED_TAG = "v0.3.4"
-REQUIRED_COMMIT = "1ce68a08a9387d9a36d22c3c259e44533199c347"
+REQUIRED_TAG = "v0.3.5"
+REQUIRED_COMMIT = "d2ea470267d9fb5dc4d1ee53b9ce268a831c60dc"
 SELECTED = ("LICENSE", "include", "src")
 ADAPTATION_NAME = "ADAPTATIONS.patch"
 ADAPTATION_FORMAT = "git-diff-unified-zero"
